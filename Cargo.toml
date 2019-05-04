@@ -1,0 +1,7 @@
+[package]
+name = "shattuck"
+version = "0.1.0"
+authors = ["cowsay"]
+edition = "2018"
+
+[dependencies]
