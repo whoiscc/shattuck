@@ -258,4 +258,26 @@ mod tests {
         assert!(third.is_none());
         assert!(mem.get_object(holdee).is_some());
     }
+
+    use crate::objects::IntObject;
+    use crate::core::object::{check_type, as_type};
+
+    #[test]
+    fn same_in_same_out() {
+        let mut mem = Memory::with_max_object_count(2);
+        let int_obj1 = mem.append_object(Box::new(IntObject(42))).unwrap();
+        assert_same_int(&mem, int_obj1, 42);
+        let int_obj2 = mem.append_object(Box::new(IntObject(43))).unwrap();
+        mem.set_root(int_obj2);
+        let int_obj3 = mem.append_object(Box::new(IntObject(44))).unwrap();
+        assert_same_int(&mem, int_obj2, 43);
+        assert_same_int(&mem, int_obj3, 44);
+    }
+
+    fn assert_same_int(mem: &Memory, addr: Addr, expect: i64) {
+        let returned_obj = &**mem.get_object(addr).unwrap();
+        assert!(check_type::<IntObject>(returned_obj));
+        let returned_int_obj = as_type::<IntObject>(returned_obj).unwrap();
+        assert_eq!(*returned_int_obj, IntObject(expect));
+    }
 }

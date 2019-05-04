@@ -2,6 +2,7 @@
 
 extern crate shattuck;
 use shattuck::core::memory::Memory;
+use shattuck::core::object::as_type;
 use shattuck::objects::{DerivedObject, IntObject};
 
 fn main() {
@@ -15,8 +16,7 @@ fn main() {
     mem.set_object_property(yukari, &key, age);
     // print(yukari.age)
     let age_prop = mem.get_object_property(yukari, &key);
-    println!("{:?}", age_prop);
-    println!("{:?}", mem.get_object(age_prop.unwrap()));
+    println!("{:?}", as_type::<IntObject>(&**mem.get_object(age_prop.unwrap()).unwrap()));
 
     // marisa = new DerivedObject()
     let marisa = mem.append_object(Box::new(DerivedObject::new())).unwrap();

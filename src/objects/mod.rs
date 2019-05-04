@@ -38,7 +38,7 @@ impl Object for DerivedObject {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct IntObject(pub i64);
 
 impl Object for IntObject {
