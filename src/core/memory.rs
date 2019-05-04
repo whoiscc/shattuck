@@ -101,6 +101,9 @@ impl Memory {
     }
 
     fn collect(&mut self) {
+        use std::time::Instant;
+        let now = Instant::now();
+
         let mut alive_indices = Vec::<PrivAddr>::new();
         let mut queue = VecDeque::<usize>::new();
         if let Some(root_index) = self.root_index {
@@ -160,8 +163,8 @@ impl Memory {
 
         assert!(alive_count + dead_count == self.max_object_count);
         println!(
-            "<shattuck> garbage collected, {} alive, {} dead",
-            alive_count, dead_count
+            "<shattuck> garbage collected, {} alive, {} dead, duration: {} ms",
+            alive_count, dead_count, now.elapsed().as_micros() as f64 / 1000.0
         );
     }
 
@@ -259,8 +262,8 @@ mod tests {
         assert!(mem.get_object(holdee).is_some());
     }
 
+    use crate::core::object::{as_type, check_type};
     use crate::objects::IntObject;
-    use crate::core::object::{check_type, as_type};
 
     #[test]
     fn same_in_same_out() {
@@ -279,5 +282,56 @@ mod tests {
         assert!(check_type::<IntObject>(returned_obj));
         let returned_int_obj = as_type::<IntObject>(returned_obj).unwrap();
         assert_eq!(*returned_int_obj, IntObject(expect));
+    }
+
+    #[test]
+    fn random_hold() {
+        extern crate rand;
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+
+        for _ in 0..10 {
+            let mut mem = Memory::with_max_object_count(1024);
+            let mut addr_vec = Vec::<Addr>::new();
+            let mut alive_set = HashSet::<Addr>::new();
+            let mut obj_count = 0;
+            let root = mem.append_object(Box::new(IntObject(obj_count))).unwrap();
+            mem.set_root(root);
+            obj_count += 1;
+            addr_vec.push(root);
+            alive_set.insert(root);
+            while obj_count < 1024 {
+                let obj = mem.append_object(Box::new(IntObject(obj_count))).unwrap();
+                obj_count += 1;
+                addr_vec.push(obj);
+                let mut chance = 0.8;
+                while rng.gen::<f64>() < chance {
+                    // minus 1 to prevent self-holding
+                    let holder = rng.gen_range(0, obj_count - 1) as usize;
+                    let holder_addr = addr_vec[holder];
+                    mem.hold(holder_addr, obj);
+                    if alive_set.contains(&holder_addr) {
+                        alive_set.insert(obj);
+                    }
+                    chance -= 0.2;
+                }
+            }
+            let _ = mem.append_object(Box::new(DummyObject)).unwrap();
+            for addr in addr_vec {
+                if alive_set.contains(&addr) {
+                    assert!(mem.get_object(addr).is_some());
+                } else {
+                    assert!(mem.get_object(addr).is_none());
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn random_hold_1000() {
+        for _ in 0..100 {
+            random_hold();
+        }
     }
 }
