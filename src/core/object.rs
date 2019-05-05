@@ -29,11 +29,3 @@ impl<T: Object> AsAny for T {
         self
     }
 }
-
-pub fn as_type<T: 'static>(object: &dyn Object) -> Option<&T> {
-    object.as_any().downcast_ref::<T>()
-}
-
-pub fn check_type<T: 'static>(object: &dyn Object) -> bool {
-    object.as_any().is::<T>()
-}

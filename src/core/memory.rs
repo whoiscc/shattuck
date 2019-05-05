@@ -1,6 +1,8 @@
 //
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::error::Error;
+use std::fmt::{Display, Formatter, Result as FmtResult};
 
 use crate::core::interp::Name;
 use crate::core::object::Object;
@@ -20,6 +22,23 @@ pub struct Memory {
     ref_map: HashMap<Addr, HashSet<Addr>>,
 }
 
+#[derive(Debug)]
+pub enum MemoryError {
+    Full,
+    InvalidAddr(Addr),
+}
+
+impl Display for MemoryError {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        match self {
+            MemoryError::Full => write!(f, "momery is full"),
+            MemoryError::InvalidAddr(_) => write!(f, "access invalid address"),
+        }
+    }
+}
+
+impl Error for MemoryError {}
+
 impl Memory {
     pub fn with_max_object_count(count: usize) -> Self {
         Memory {
@@ -31,41 +50,55 @@ impl Memory {
         }
     }
 
-    pub fn append_object(&mut self, object: Box<dyn Object>) -> Option<Addr> {
+    pub fn append_object(&mut self, object: Box<dyn Object>) -> Result<Addr, MemoryError> {
         if self.objects.len() == self.max_object_count {
             self.collect();
         }
 
         if self.objects.len() == self.max_object_count {
-            return None;
+            return Err(MemoryError::Full);
         }
         let addr = self.allocate_addr();
         self.objects.insert(addr, object);
         self.ref_map.insert(addr, HashSet::new());
-        Some(addr)
+        Ok(addr)
     }
 
-    pub fn get_object(&self, addr: Addr) -> Option<&dyn Object> {
-        self.objects.get(&addr).map(|boxed_obj| &**boxed_obj)
+    pub fn get_object(&self, addr: Addr) -> Result<&dyn Object, MemoryError> {
+        self.objects
+            .get(&addr)
+            .map(|boxed_obj| &**boxed_obj)
+            .ok_or(MemoryError::InvalidAddr(addr))
     }
 
-    pub fn get_object_mut(&mut self, addr: Addr) -> Option<&mut dyn Object> {
+    pub fn get_object_mut(&mut self, addr: Addr) -> Result<&mut dyn Object, MemoryError> {
         self.objects
             .get_mut(&addr)
             .map(|boxed_obj| &mut **boxed_obj)
+            .ok_or(MemoryError::InvalidAddr(addr))
     }
 
-    pub fn set_root(&mut self, addr: Addr) {
-        assert!(self.get_object(addr).is_some());
+    pub fn set_root(&mut self, addr: Addr) -> Result<(), MemoryError> {
+        self.get_object(addr)?;
         self.root_addr = Some(addr);
+        Ok(())
     }
 
-    pub fn hold(&mut self, holder: Addr, holdee: Addr) {
-        self.ref_map.get_mut(&holder).unwrap().insert(holdee);
+    pub fn hold(&mut self, holder: Addr, holdee: Addr) -> Result<(), MemoryError> {
+        self.get_object(holdee)?;
+        self.ref_map
+            .get_mut(&holder)
+            .ok_or(MemoryError::InvalidAddr(holder))?
+            .insert(holdee);
+        Ok(())
     }
 
-    pub fn drop(&mut self, holder: Addr, holdee: Addr) {
-        self.ref_map.get_mut(&holder).unwrap().remove(&holdee);
+    pub fn drop(&mut self, holder: Addr, holdee: Addr) -> Result<(), MemoryError> {
+        self.ref_map
+            .get_mut(&holder)
+            .ok_or(MemoryError::InvalidAddr(holder))?
+            .remove(&holdee);
+        Ok(())
     }
 
     pub fn collect(&mut self) {
@@ -111,14 +144,20 @@ impl Memory {
         addr
     }
 
-    pub fn set_object_property(&mut self, addr: Addr, key: &str, new_prop: Addr) {
-        let object = self.get_object(addr).unwrap();
+    pub fn set_object_property(
+        &mut self,
+        addr: Addr,
+        key: &str,
+        new_prop: Addr,
+    ) -> Result<(), MemoryError> {
+        let object = self.get_object(addr)?;
         if let Some(old_prop) = object.get_property(key) {
-            self.drop(addr, old_prop.addr());
+            self.drop(addr, old_prop.addr())?;
         }
-        let object_mut = self.get_object_mut(addr).unwrap();
+        let object_mut = self.get_object_mut(addr)?;
         object_mut.set_property(key, Name::with_addr(new_prop));
-        self.hold(addr, new_prop);
+        self.hold(addr, new_prop)?;
+        Ok(())
     }
 }
 
@@ -143,44 +182,43 @@ mod tests {
         let mut mem = Memory::with_max_object_count(16);
         let obj = Box::new(DummyObject);
         let addr = mem.append_object(obj);
-        assert!(addr.is_some());
+        assert!(addr.is_ok());
         let returned_obj = mem.get_object(addr.unwrap());
-        assert!(returned_obj.is_some());
+        assert!(returned_obj.is_ok());
     }
 
     #[test]
     fn store_fail_when_no_space() {
         let mut mem = Memory::with_max_object_count(1);
         let addr = mem.append_object(Box::new(DummyObject));
-        mem.set_root(addr.unwrap());
-        assert!(mem.append_object(Box::new(DummyObject)).is_none());
+        mem.set_root(addr.unwrap()).unwrap();
+        assert!(mem.append_object(Box::new(DummyObject)).is_err());
     }
 
     #[test]
     fn collect_orphan_objects() {
         let mut mem = Memory::with_max_object_count(2);
         let root = mem.append_object(Box::new(DummyObject));
-        mem.set_root(root.unwrap());
+        mem.set_root(root.unwrap()).unwrap();
         let orphan = mem.append_object(Box::new(DummyObject)).unwrap();
         let third = mem.append_object(Box::new(DummyObject));
-        assert!(third.is_some());
-        assert!(mem.get_object(orphan).is_none());
-        assert!(mem.get_object(third.unwrap()).is_some());
+        assert!(third.is_ok());
+        assert!(mem.get_object(orphan).is_err());
+        assert!(mem.get_object(third.unwrap()).is_ok());
     }
 
     #[test]
     fn not_collect_held_objects() {
         let mut mem = Memory::with_max_object_count(2);
         let root = mem.append_object(Box::new(DummyObject)).unwrap();
-        mem.set_root(root);
+        mem.set_root(root).unwrap();
         let holdee = mem.append_object(Box::new(DummyObject)).unwrap();
-        mem.hold(root, holdee);
+        mem.hold(root, holdee).unwrap();
         let third = mem.append_object(Box::new(DummyObject));
-        assert!(third.is_none());
-        assert!(mem.get_object(holdee).is_some());
+        assert!(third.is_err());
+        assert!(mem.get_object(holdee).is_ok());
     }
 
-    use crate::core::object::{as_type, check_type};
     use crate::objects::int::IntObject;
 
     #[test]
@@ -189,7 +227,7 @@ mod tests {
         let int_obj1 = mem.append_object(Box::new(IntObject(42))).unwrap();
         assert_same_int(&mem, int_obj1, 42);
         let int_obj2 = mem.append_object(Box::new(IntObject(43))).unwrap();
-        mem.set_root(int_obj2);
+        mem.set_root(int_obj2).unwrap();
         let int_obj3 = mem.append_object(Box::new(IntObject(44))).unwrap();
         assert_same_int(&mem, int_obj2, 43);
         assert_same_int(&mem, int_obj3, 44);
@@ -197,8 +235,8 @@ mod tests {
 
     fn assert_same_int(mem: &Memory, addr: Addr, expect: i64) {
         let returned_obj = mem.get_object(addr).unwrap();
-        assert!(check_type::<IntObject>(returned_obj));
-        let returned_int_obj = as_type::<IntObject>(returned_obj).unwrap();
+        assert!(returned_obj.as_any().is::<IntObject>());
+        let returned_int_obj = returned_obj.as_any().downcast_ref::<IntObject>().unwrap();
         assert_eq!(*returned_int_obj, IntObject(expect));
     }
 
@@ -214,7 +252,7 @@ mod tests {
             let mut alive_set = HashSet::<Addr>::new();
             let mut obj_count = 0;
             let root = mem.append_object(Box::new(IntObject(obj_count))).unwrap();
-            mem.set_root(root);
+            mem.set_root(root).unwrap();
             obj_count += 1;
             addr_vec.push(root);
             alive_set.insert(root);
@@ -227,7 +265,7 @@ mod tests {
                     // minus 1 to prevent self-holding
                     let holder = rng.gen_range(0, obj_count - 1) as usize;
                     let holder_addr = addr_vec[holder];
-                    mem.hold(holder_addr, obj);
+                    mem.hold(holder_addr, obj).unwrap();
                     if alive_set.contains(&holder_addr) {
                         alive_set.insert(obj);
                     }
@@ -237,9 +275,9 @@ mod tests {
             let _ = mem.append_object(Box::new(DummyObject)).unwrap();
             for addr in addr_vec {
                 if alive_set.contains(&addr) {
-                    assert!(mem.get_object(addr).is_some());
+                    assert!(mem.get_object(addr).is_ok());
                 } else {
-                    assert!(mem.get_object(addr).is_none());
+                    assert!(mem.get_object(addr).is_err());
                 }
             }
         }
