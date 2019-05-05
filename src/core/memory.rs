@@ -70,21 +70,28 @@ impl Memory {
     }
 
     pub fn get_object(&self, addr: Addr) -> Option<&Box<dyn Object>> {
-        let index = self.get_to_space_index(addr)?;
+        let index = self.get_object_index(addr)?;
         let priv_addr = self.object_indices.get(index)?;
         let object = self.objects.get(priv_addr)?;
         Some(object)
     }
 
+    pub fn get_object_mut(&mut self, addr: Addr) -> Option<&mut Box<dyn Object>> {
+        let index = self.get_object_index(addr)?;
+        let priv_addr = self.object_indices.get(index)?;
+        let object = self.objects.get_mut(priv_addr)?;
+        Some(object)
+    }
+
     pub fn set_root(&mut self, addr: Addr) {
-        let index = self.get_to_space_index(addr).unwrap();
+        let index = self.get_object_index(addr).unwrap();
         assert!(self.object_indices.get(index).is_some());
         self.root_index = Some(index);
     }
 
     pub fn hold(&mut self, holder: Addr, holdee: Addr) {
-        let holder_index = self.get_to_space_index(holder).unwrap();
-        let holdee_index = self.get_to_space_index(holdee).unwrap();
+        let holder_index = self.get_object_index(holder).unwrap();
+        let holdee_index = self.get_object_index(holdee).unwrap();
         self.ref_map
             .get_mut(&holder_index)
             .unwrap()
@@ -92,8 +99,8 @@ impl Memory {
     }
 
     pub fn drop(&mut self, holder: Addr, holdee: Addr) {
-        let holder_index = self.get_to_space_index(holder).unwrap();
-        let holdee_index = self.get_to_space_index(holdee).unwrap();
+        let holder_index = self.get_object_index(holder).unwrap();
+        let holdee_index = self.get_object_index(holdee).unwrap();
         self.ref_map
             .get_mut(&holder_index)
             .unwrap()
@@ -103,6 +110,8 @@ impl Memory {
     pub fn collect(&mut self) {
         use std::time::Instant;
         let now = Instant::now();
+
+        let object_count = self.objects.len();
 
         let mut alive_indices = Vec::<PrivAddr>::new();
         let mut queue = VecDeque::<usize>::new();
@@ -161,14 +170,16 @@ impl Memory {
             .as_ref()
             .map(|root_index| forward_map[root_index]);
 
-        assert!(alive_count + dead_count <= self.max_object_count);
+        assert!(alive_count + dead_count == object_count);
         println!(
             "<shattuck> garbage collected, {} alive, {} dead, duration: {} ms",
-            alive_count, dead_count, now.elapsed().as_micros() as f64 / 1000.0
+            alive_count,
+            dead_count,
+            now.elapsed().as_micros() as f64 / 1000.0
         );
     }
 
-    fn get_to_space_index(&self, addr: Addr) -> Option<usize> {
+    fn get_object_index(&self, addr: Addr) -> Option<usize> {
         let index = self.addr_map.get(&addr)?;
         Some(index.to_owned())
     }
@@ -185,13 +196,8 @@ impl Memory {
         priv_addr
     }
 
-    // object operation
-    pub fn get_object_property(&self, addr: Addr, key: &str) -> Option<Addr> {
-        self.get_object(addr)?.get_property(key)
-    }
-
     pub fn set_object_property(&mut self, addr: Addr, key: &str, new_prop: Addr) -> Option<()> {
-        let index = self.get_to_space_index(addr)?;
+        let index = self.get_object_index(addr)?;
         let priv_addr = self.object_indices.get(index)?.to_owned();
         let object = self.objects.get(&priv_addr)?;
         if let Some(old_prop) = object.get_property(key) {

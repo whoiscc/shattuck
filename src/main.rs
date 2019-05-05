@@ -2,7 +2,6 @@
 
 extern crate shattuck;
 use shattuck::core::interp::Interp;
-use shattuck::core::object::as_type;
 use shattuck::objects::{DerivedObject, IntObject};
 
 fn main() {
@@ -10,48 +9,36 @@ fn main() {
     let mut interp = Interp::new(context, 128);
     interp.push_frame();
     interp.push_env();
-    // let yukari = new DerivedObject()
-    interp.insert_object("yukari", Box::new(DerivedObject::new()));
-    // this.wife = yukari  # prevent yukari to be collected
-    interp
-        .set_context_object_property("wife", "yukari")
-        .unwrap();
-    // let age = new IntObject(18)
-    interp.insert_object("age", Box::new(IntObject(18)));
-    // yukari.age = age
-    interp.set_object_property("yukari", "age", "age").unwrap();
-    // print(this.wife.age)
-    let backup_this = interp.get_context_object();
-    // 1. this = this.wife
-    interp.change_context_object(
-        interp
-            .get_object_property_raw(interp.get_context_object(), "wife")
-            .unwrap(),
-    );
-    // 2. print(this.age)
-    println!(
-        "{:?}",
-        as_type::<IntObject>(
-            &**interp
-                .get_raw_object(
-                    interp
-                        .get_object_property_raw(interp.get_context_object(), "age")
-                        .unwrap()
-                )
-                .unwrap()
-        )
-    );
-    // 3. restore this
-    interp.change_context_object(backup_this);
+    // let laptop = new DerivedObject()
+    // 1. <t1> = new DerivedObject()
+    let t1 = interp.append_object(Box::new(DerivedObject::new())).unwrap();
+    // 2. let laptop = <t1>
+    interp.insert_name(t1, "laptop");
 
-    interp.garbage_collect();
+    // laptop.size = new IntObject(13)
+    // 1. <t2> = new IntObject(13)
+    let t2 = interp.append_object(Box::new(IntObject(13))).unwrap();
+    // 2. <t1>.size = <t2>
+    interp.set_property(t1, "size", t2);
 
-    interp.pop_env();
-    interp.push_env();
+    // this.laptop = laptop
+    // 1. <t3> = this
+    let t3 = interp.context();
+    // 2. <t3>.laptop = <t1>
+    interp.set_property(t3, "laptop", t1);
 
-    // this.wife = new DerivedObject()
-    interp.insert_object("random_wife", Box::new(DerivedObject::new()));
-    interp.set_context_object_property("wife", "random_wife").unwrap();
+    // laptop.size = new IntObject(15)
+    // 1. <t4> = new IntObject(15)
+    let t4 = interp.append_object(Box::new(IntObject(15))).unwrap();
+    // 2. <t1>.size = <t4>
+    interp.set_property(t1, "size", t4);
 
+    // print(this.laptop.size)
+    let t5 = interp.context();  // unnecessary
+    let t6 = interp.get_property(t5, "laptop").unwrap();  // unnecessary
+    let t7 = interp.get_property(t6, "size").unwrap();  // unnecessary
+    println!("{:?}", interp.get_object::<IntObject>(t7));
+
+    // IntObject(13) should be collected
     interp.garbage_collect();
 }
