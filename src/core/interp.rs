@@ -77,7 +77,7 @@ impl Frame {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Name(Addr);
 
 impl Name {
@@ -171,16 +171,16 @@ impl Interp {
         self.context_object = name.addr();
     }
 
-    // this = <context>; <method>({args}); restore this
-    pub fn run_method(&mut self, context: Name, method: Name) -> Option<()> {
-        let MethodObject(method_ref) = self.get_object(method)?;
-        let method_fn = method_ref.to_owned();
+    // <method>(&{args})
+    pub fn run_method(&mut self, method: Name) -> Option<()> {
+        let method_object: &MethodObject = self.get_object(method)?;
+        let internal_method = method_object.run.to_owned();
 
         let backup_context = self.context();
-        self.set_context(context);
+        self.set_context(self.get_property(method, "context").unwrap());
         self.push_frame();
         self.push_env();
-        method_fn(self);
+        internal_method(self);
         self.pop_env();
         self.pop_frame();
         self.set_context(backup_context);
