@@ -1,10 +1,9 @@
 //
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::mem::swap;
 
-use crate::core::object::Object;
 use crate::core::interp::Name;
+use crate::core::object::Object;
 
 #[derive(Clone, Copy, Hash, Debug)]
 pub struct Addr(usize);
@@ -17,25 +16,16 @@ impl PartialEq for Addr {
 
 impl Eq for Addr {}
 
-// prevent confusing from public Addr
-#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
-struct PrivAddr(Addr);
-
 pub struct Memory {
     max_object_count: usize,
     // the space actually saved (the pointers of) the objects
-    objects: HashMap<PrivAddr, Box<dyn Object>>,
-    // the indices of `objects`
-    object_indices: Vec<PrivAddr>,
-    // the indices of `object_indices`
-    addr_map: HashMap<Addr, usize>,
+    objects: HashMap<Addr, Box<dyn Object>>,
     // counter for Addr and PrivAddr
     next_addr: usize,
-    next_priv_addr: usize,
     // root index in `to_space`
-    root_index: Option<usize>,
+    root_addr: Option<Addr>,
     // reference map, keys and values are indices of `to_space`
-    ref_map: HashMap<usize, HashSet<usize>>,
+    ref_map: HashMap<Addr, HashSet<Addr>>,
 }
 
 impl Memory {
@@ -43,11 +33,8 @@ impl Memory {
         Memory {
             max_object_count: count,
             objects: HashMap::new(),
-            object_indices: Vec::new(),
-            addr_map: HashMap::new(),
             next_addr: 0,
-            next_priv_addr: 0,
-            root_index: None,
+            root_addr: None,
             ref_map: HashMap::new(),
         }
     }
@@ -60,118 +47,62 @@ impl Memory {
         if self.objects.len() == self.max_object_count {
             return None;
         }
-        let priv_addr = self.allocate_priv_addr();
-        self.objects.insert(priv_addr, object);
-        let index = self.object_indices.len();
-        self.object_indices.push(priv_addr);
         let addr = self.allocate_addr();
-        self.addr_map.insert(addr, index);
-        self.ref_map.insert(index, HashSet::new());
+        self.objects.insert(addr, object);
+        self.ref_map.insert(addr, HashSet::new());
         Some(addr)
     }
 
     pub fn get_object(&self, addr: Addr) -> Option<&Box<dyn Object>> {
-        let index = self.get_object_index(addr)?;
-        let priv_addr = self.object_indices.get(index)?;
-        let object = self.objects.get(priv_addr)?;
-        Some(object)
+        self.objects.get(&addr)
     }
 
     pub fn get_object_mut(&mut self, addr: Addr) -> Option<&mut Box<dyn Object>> {
-        let index = self.get_object_index(addr)?;
-        let priv_addr = self.object_indices.get(index)?;
-        let object = self.objects.get_mut(priv_addr)?;
-        Some(object)
+        self.objects.get_mut(&addr)
     }
 
     pub fn set_root(&mut self, addr: Addr) {
-        let index = self.get_object_index(addr).unwrap();
-        assert!(self.object_indices.get(index).is_some());
-        self.root_index = Some(index);
+        assert!(self.get_object(addr).is_some());
+        self.root_addr = Some(addr);
     }
 
     pub fn hold(&mut self, holder: Addr, holdee: Addr) {
-        let holder_index = self.get_object_index(holder).unwrap();
-        let holdee_index = self.get_object_index(holdee).unwrap();
-        self.ref_map
-            .get_mut(&holder_index)
-            .unwrap()
-            .insert(holdee_index);
+        self.ref_map.get_mut(&holder).unwrap().insert(holdee);
     }
 
     pub fn drop(&mut self, holder: Addr, holdee: Addr) {
-        let holder_index = self.get_object_index(holder).unwrap();
-        let holdee_index = self.get_object_index(holdee).unwrap();
-        self.ref_map
-            .get_mut(&holder_index)
-            .unwrap()
-            .remove(&holdee_index);
+        self.ref_map.get_mut(&holder).unwrap().remove(&holdee);
     }
 
     pub fn collect(&mut self) {
         use std::time::Instant;
         let now = Instant::now();
 
-        let object_count = self.objects.len();
-
-        let mut alive_indices = Vec::<PrivAddr>::new();
-        let mut queue = VecDeque::<usize>::new();
-        if let Some(root_index) = self.root_index {
-            queue.push_back(root_index);
+        let mut queue = VecDeque::<Addr>::new();
+        let mut dead_set: HashSet<Addr> = self.objects.keys().cloned().collect();
+        if let Some(root_addr) = self.root_addr {
+            queue.push_back(root_addr);
         }
-        let mut forward_map = HashMap::<usize, usize>::new();
 
         // for each alive object
-        while let Some(object_index) = queue.pop_front() {
-            // add it to alive list
-            let priv_addr = self.object_indices[object_index];
-            let new_index = alive_indices.len();
-            alive_indices.push(priv_addr);
-            forward_map.insert(object_index, new_index);
+        while let Some(object_addr) = queue.pop_front() {
+            // remove it from dead set
+            dead_set.remove(&object_addr);
             // queue its holdee
-            for holdee_index in self.ref_map[&object_index].iter() {
-                if !forward_map.contains_key(holdee_index) {
-                    queue.push_back(holdee_index.to_owned());
+            for holdee_addr in self.ref_map[&object_addr].iter() {
+                if dead_set.contains(holdee_addr) {
+                    queue.push_back(holdee_addr.to_owned());
                 }
             }
         }
 
-        // update object_indices
-        let mut old_indices = alive_indices;
-        swap(&mut old_indices, &mut self.object_indices);
-        // update addr_map, ref_map & objects
-        let mut old_addr_map = HashMap::<Addr, usize>::new();
-        let mut old_ref_map = HashMap::<usize, HashSet<usize>>::new();
-        swap(&mut self.addr_map, &mut old_addr_map);
-        swap(&mut self.ref_map, &mut old_ref_map);
-        let (mut alive_count, mut dead_count) = (0, 0);
-        for (addr, index) in old_addr_map.into_iter() {
-            if forward_map.contains_key(&index) {
-                let new_index = forward_map[&index];
-                self.addr_map.insert(addr, new_index);
-                let ref_set: HashSet<usize> = old_ref_map
-                    .get(&index)
-                    .take()
-                    // each `index` appear only one in this for loop,
-                    // so it's safe to assume `.get` always returns a `Some`
-                    .unwrap()
-                    .iter()
-                    .map(|holdee| forward_map[holdee])
-                    .collect();
-                self.ref_map.insert(new_index, ref_set);
-                alive_count += 1;
-            } else {
-                self.objects.remove(&old_indices[index]);
-                dead_count += 1;
-            }
+        // update objects
+        let dead_count = dead_set.len();
+        for dead_addr in dead_set {
+            self.objects.remove(&dead_addr);
         }
-        // update root_index
-        self.root_index = self
-            .root_index
-            .as_ref()
-            .map(|root_index| forward_map[root_index]);
 
-        assert!(alive_count + dead_count == object_count);
+        let alive_count = self.objects.len();
         println!(
             "<shattuck> garbage collected, {} alive, {} dead, duration: {} ms",
             alive_count,
@@ -180,34 +111,20 @@ impl Memory {
         );
     }
 
-    fn get_object_index(&self, addr: Addr) -> Option<usize> {
-        let index = self.addr_map.get(&addr)?;
-        Some(index.to_owned())
-    }
-
     fn allocate_addr(&mut self) -> Addr {
         let addr = Addr(self.next_addr);
         self.next_addr += 1;
         addr
     }
 
-    fn allocate_priv_addr(&mut self) -> PrivAddr {
-        let priv_addr = PrivAddr(Addr(self.next_priv_addr));
-        self.next_priv_addr += 1;
-        priv_addr
-    }
-
-    pub fn set_object_property(&mut self, addr: Addr, key: &str, new_prop: Addr) -> Option<()> {
-        let index = self.get_object_index(addr)?;
-        let priv_addr = self.object_indices.get(index)?.to_owned();
-        let object = self.objects.get(&priv_addr)?;
+    pub fn set_object_property(&mut self, addr: Addr, key: &str, new_prop: Addr) {
+        let object = self.get_object(addr).unwrap();
         if let Some(old_prop) = object.get_property(key) {
             self.drop(addr, old_prop.addr());
         }
-        let object_mut = self.objects.get_mut(&priv_addr)?;
+        let object_mut = self.get_object_mut(addr).unwrap();
         object_mut.set_property(key, Name::with_addr(new_prop));
         self.hold(addr, new_prop);
-        Some(())
     }
 }
 
