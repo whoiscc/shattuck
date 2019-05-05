@@ -36,12 +36,12 @@ impl Env {
 }
 
 impl Object for Env {
-    fn get_property(&self, key: &str) -> Option<Addr> {
-        self.find_object(key)
+    fn get_property(&self, key: &str) -> Option<Name> {
+        Some(Name::with_addr(self.find_object(key)?))
     }
 
-    fn set_property(&mut self, key: &str, new_prop: Addr) {
-        self.insert_object(key, new_prop);
+    fn set_property(&mut self, key: &str, new_prop: Name) {
+        self.insert_object(key, new_prop.addr());
     }
 }
 
@@ -67,7 +67,7 @@ impl Frame {
         mem.hold(object, self.current_env())
     }
 
-    fn find_object(&self, mem: &Memory, name: &str) -> Option<Addr> {
+    fn find_object(&self, mem: &Memory, name: &str) -> Option<Name> {
         mem.get_object(self.current_env())?.get_property(name)
     }
 
@@ -76,8 +76,18 @@ impl Frame {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Name(Addr);
+
+impl Name {
+    pub(crate) fn with_addr(addr: Addr) -> Self {
+        Name(addr)
+    }
+
+    pub(crate) fn addr(&self) -> Addr {
+        self.0
+    }
+}
 
 impl Interp {
     pub fn new(initial_self: Box<dyn Object>, max_object_count: usize) -> Self {
@@ -113,7 +123,7 @@ impl Interp {
     }
 
     pub fn get_object<T: 'static>(&self, name: Name) -> Option<&T> {
-        self.get_object_by_addr(name.0)
+        self.get_object_by_addr(name.addr())
     }
 
     pub fn garbage_collect(&mut self) {
@@ -128,22 +138,22 @@ impl Interp {
     // env_name = <name>
     pub fn insert_name(&mut self, name: Name, env_name: &str) {
         let frame = self.frame_stack.last().unwrap();
-        frame.insert_object(&mut self.mem, env_name, name.0);
+        frame.insert_object(&mut self.mem, env_name, name.addr());
     }
 
     // <name> = env_name
     pub fn find_name(&self, env_name: &str) -> Option<Name> {
-        Some(Name(self.frame_stack.last().unwrap().find_object(&self.mem, env_name)?))
+        self.frame_stack.last().unwrap().find_object(&self.mem, env_name)
     }
 
     // <name> = object.prop
     pub fn get_property(&self, object: Name, prop: &str) -> Option<Name> {
-        Some(Name(self.mem.get_object(object.0)?.get_property(prop)?))
+        Some(self.mem.get_object(object.addr())?.get_property(prop)?)
     }
 
     // object.prop = <name>
     pub fn set_property(&mut self, object: Name, prop: &str, name: Name) {
-        self.mem.set_object_property(object.0, prop, name.0);
+        self.mem.set_object_property(object.addr(), prop, name.addr());
     }
 
     // <name> = this
@@ -153,6 +163,6 @@ impl Interp {
 
     // this = <name>
     pub fn set_context(&mut self, name: Name) {
-        self.context_object = name.0;
+        self.context_object = name.addr();
     }
 }

@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::mem::swap;
 
 use crate::core::object::Object;
+use crate::core::interp::Name;
 
 #[derive(Clone, Copy, Hash, Debug)]
 pub struct Addr(usize);
@@ -201,10 +202,10 @@ impl Memory {
         let priv_addr = self.object_indices.get(index)?.to_owned();
         let object = self.objects.get(&priv_addr)?;
         if let Some(old_prop) = object.get_property(key) {
-            self.drop(addr, old_prop);
+            self.drop(addr, old_prop.addr());
         }
         let object_mut = self.objects.get_mut(&priv_addr)?;
-        object_mut.set_property(key, new_prop);
+        object_mut.set_property(key, Name::with_addr(new_prop));
         self.hold(addr, new_prop);
         Some(())
     }
@@ -217,11 +218,11 @@ mod tests {
     #[derive(Debug)]
     struct DummyObject;
     impl Object for DummyObject {
-        fn get_property(&self, _key: &str) -> Option<Addr> {
+        fn get_property(&self, _key: &str) -> Option<Name> {
             panic!()
         }
 
-        fn set_property(&mut self, _key: &str, _new_prop: Addr) {
+        fn set_property(&mut self, _key: &str, _new_prop: Name) {
             panic!()
         }
     }
