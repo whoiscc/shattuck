@@ -3,10 +3,20 @@
 use std::any::Any;
 
 use crate::core::interp::Name;
+use crate::objects::method::MethodObject;
 
 pub trait Object: Any + AsAny {
-    fn get_property(&self, key: &str) -> Option<Name>;
-    fn set_property(&mut self, key: &str, new_prop: Name);
+    fn get_property(&self, _key: &str) -> Option<Name> {
+        None
+    }
+
+    fn set_property(&mut self, _key: &str, _new_prop: Name) {
+        //
+    }
+
+    fn as_method(&self) -> Option<Box<dyn MethodObject>> {
+        None
+    }
 }
 
 pub trait AsAny {

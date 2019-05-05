@@ -1,32 +1,14 @@
 //
 
-use crate::core::interp::{Interp, Name};
+use crate::core::interp::Interp;
 use crate::core::object::Object;
 
-pub struct MethodObject {
-    context: Name,
-    pub(crate) run: fn(&mut Interp),
+pub trait MethodObject: Object {
+    fn run(&self, interp: &mut Interp);
 }
 
-impl MethodObject {
-    pub fn append_to(interp: &mut Interp, context: Name, run: fn(&mut Interp)) -> Option<Name> {
-        let method = interp.append_object(Box::new(MethodObject { context, run }))?;
-        interp.set_property(method, "context", context);
-        Some(method)
-    }
-}
-
-impl Object for MethodObject {
-    fn get_property(&self, key: &str) -> Option<Name> {
-        if key == "context" {
-            Some(self.context)
-        } else {
-            None
-        }
-    }
-
-    fn set_property(&mut self, key: &str, new_prop: Name) {
-        assert_eq!(key, "context");
-        assert_eq!(new_prop, self.context);
+impl<T: 'static + MethodObject + Clone> Object for T {
+    fn as_method(&self) -> Option<Box<dyn MethodObject>> {
+        Some(Box::new(self.clone()))
     }
 }
