@@ -14,6 +14,7 @@ pub trait Object: Any + AsAny {
         //
     }
 
+    // downcast
     fn as_method(&self) -> Option<Box<dyn MethodObject>> {
         None
     }

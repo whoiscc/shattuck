@@ -46,29 +46,42 @@ impl Object for Env {
 }
 
 impl Frame {
-    fn new() -> Self {
-        Frame {
-            env_stack: Vec::new(),
+    fn new(mem: &mut Memory, parent: Option<Addr>) -> Self {
+        let first_env = mem.append_object(Box::new(Env::new())).unwrap();
+        let frame = Frame {
+            env_stack: vec![first_env],
+        };
+        if let Some(parent_addr) = parent {
+            mem.hold(first_env, parent_addr);
         }
+        mem.set_root(first_env);
+        frame
     }
 
-    fn push_env(&mut self, mem: &mut Memory) {
-        let env = mem.append_object(Box::new(Env::new())).unwrap(); // TODO
+    fn push_env(&mut self, mem: &mut Memory) -> Addr {
+        let env = mem.append_object(Box::new(Env::new())).unwrap();
+        mem.hold(env, *self.env_stack.last().unwrap());
+        mem.set_root(env);
         self.env_stack.push(env);
+        env
     }
 
-    fn pop_env(&mut self) {
+    fn pop_env(&mut self, mem: &mut Memory) {
         self.env_stack.pop();
+        mem.set_root(*self.env_stack.last().unwrap());
     }
 
     fn insert_object(&self, mem: &mut Memory, name: &str, object: Addr) {
         mem.set_object_property(self.current_env(), name, object);
-        // backward holding, is it ok?
-        mem.hold(object, self.current_env())
     }
 
     fn find_object(&self, mem: &Memory, name: &str) -> Option<Name> {
-        mem.get_object(self.current_env())?.get_property(name)
+        for env in self.env_stack.iter().rev() {
+            if let Some(object) = mem.get_object(*env)?.get_property(name) {
+                return Some(object);
+            }
+        }
+        None
     }
 
     fn current_env(&self) -> Addr {
@@ -90,23 +103,27 @@ impl Name {
 }
 
 impl Interp {
-    pub fn new(initial_self: Box<dyn Object>, max_object_count: usize) -> Self {
+    pub fn new(max_object_count: usize) -> Self {
         let mut mem = Memory::with_max_object_count(max_object_count);
-        let context_object = mem.append_object(initial_self).unwrap();
-        mem.set_root(context_object);
+        let first_frame = Frame::new(&mut mem, None);
         Interp {
             mem,
-            context_object,
-            frame_stack: Vec::new(),
+            context_object: first_frame.current_env(),
+            frame_stack: vec![first_frame],
         }
     }
 
     pub fn push_frame(&mut self) {
-        self.frame_stack.push(Frame::new());
+        let frame = Frame::new(
+            &mut self.mem,
+            self.frame_stack.last().map(|frame| frame.current_env()),
+        );
+        self.frame_stack.push(frame);
     }
 
     pub fn pop_frame(&mut self) {
         self.frame_stack.pop();
+        self.mem.set_root(self.frame_stack.last().unwrap().current_env());
     }
 
     pub fn push_env(&mut self) {
@@ -115,7 +132,7 @@ impl Interp {
     }
 
     pub fn pop_env(&mut self) {
-        self.frame_stack.last_mut().unwrap().pop_env();
+        self.frame_stack.last_mut().unwrap().pop_env(&mut self.mem);
     }
 
     fn get_object_by_addr<T: 'static>(&self, addr: Addr) -> Option<&T> {
@@ -175,9 +192,7 @@ impl Interp {
         let method_object = self.mem.get_object(method.addr())?.as_method()?;
 
         self.push_frame();
-        self.push_env();
         method_object.run(self);
-        self.pop_env();
         self.pop_frame();
         Some(())
     }
