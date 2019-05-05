@@ -1,27 +1,57 @@
 //
 
 extern crate shattuck;
-use shattuck::core::memory::Memory;
+use shattuck::core::interp::Interp;
 use shattuck::core::object::as_type;
 use shattuck::objects::{DerivedObject, IntObject};
 
 fn main() {
-    let mut mem = Memory::with_max_object_count(3);
-    // yukari = new DerivedObject()
-    let yukari = mem.append_object(Box::new(DerivedObject::new())).unwrap();
-    // age = new IntObject(18)
-    let age = mem.append_object(Box::new(IntObject(18))).unwrap();
+    let context = Box::new(DerivedObject::new());
+    let mut interp = Interp::new(context, 128);
+    interp.push_frame();
+    interp.push_env();
+    // let yukari = new DerivedObject()
+    interp.insert_object("yukari", Box::new(DerivedObject::new()));
+    // this.wife = yukari  # prevent yukari to be collected
+    interp
+        .set_context_object_property("wife", "yukari")
+        .unwrap();
+    // let age = new IntObject(18)
+    interp.insert_object("age", Box::new(IntObject(18)));
     // yukari.age = age
-    let key = "age".to_string();
-    mem.set_object_property(yukari, &key, age);
-    // print(yukari.age)
-    let age_prop = mem.get_object_property(yukari, &key);
-    println!("{:?}", as_type::<IntObject>(&**mem.get_object(age_prop.unwrap()).unwrap()));
+    interp.set_object_property("yukari", "age", "age").unwrap();
+    // print(this.wife.age)
+    let backup_this = interp.get_context_object();
+    // 1. this = this.wife
+    interp.change_context_object(
+        interp
+            .get_object_property_raw(interp.get_context_object(), "wife")
+            .unwrap(),
+    );
+    // 2. print(this.age)
+    println!(
+        "{:?}",
+        as_type::<IntObject>(
+            &**interp
+                .get_raw_object(
+                    interp
+                        .get_object_property_raw(interp.get_context_object(), "age")
+                        .unwrap()
+                )
+                .unwrap()
+        )
+    );
+    // 3. restore this
+    interp.change_context_object(backup_this);
 
-    // marisa = new DerivedObject()
-    let marisa = mem.append_object(Box::new(DerivedObject::new())).unwrap();
-    mem.set_root(marisa);
-    // correct_age = new IntObject(4294967296)
-    let correct_age = mem.append_object(Box::new(IntObject(4294967296))).unwrap();
-    println!("{:?}", mem.set_object_property(yukari, &key, correct_age));
+    interp.garbage_collect();
+
+    interp.pop_env();
+    interp.push_env();
+
+    // this.wife = new DerivedObject()
+    interp.insert_object("random_wife", Box::new(DerivedObject::new()));
+    interp.set_context_object_property("wife", "random_wife").unwrap();
+
+    interp.garbage_collect();
 }

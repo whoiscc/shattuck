@@ -4,8 +4,8 @@ use std::any::Any;
 use crate::core::memory::Addr;
 
 pub trait Object: Any + AsAny {
-    fn get_property(&self, key: &String) -> Option<Addr>;
-    fn set_property(&mut self, key: &String, new_prop: Addr);
+    fn get_property(&self, key: &str) -> Option<Addr>;
+    fn set_property(&mut self, key: &str, new_prop: Addr);
 }
 
 pub trait AsAny {

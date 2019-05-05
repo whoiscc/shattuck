@@ -100,7 +100,7 @@ impl Memory {
             .remove(&holdee_index);
     }
 
-    fn collect(&mut self) {
+    pub fn collect(&mut self) {
         use std::time::Instant;
         let now = Instant::now();
 
@@ -161,7 +161,7 @@ impl Memory {
             .as_ref()
             .map(|root_index| forward_map[root_index]);
 
-        assert!(alive_count + dead_count == self.max_object_count);
+        assert!(alive_count + dead_count <= self.max_object_count);
         println!(
             "<shattuck> garbage collected, {} alive, {} dead, duration: {} ms",
             alive_count, dead_count, now.elapsed().as_micros() as f64 / 1000.0
@@ -186,11 +186,11 @@ impl Memory {
     }
 
     // object operation
-    pub fn get_object_property(&mut self, addr: Addr, key: &String) -> Option<Addr> {
+    pub fn get_object_property(&self, addr: Addr, key: &str) -> Option<Addr> {
         self.get_object(addr)?.get_property(key)
     }
 
-    pub fn set_object_property(&mut self, addr: Addr, key: &String, new_prop: Addr) -> Option<()> {
+    pub fn set_object_property(&mut self, addr: Addr, key: &str, new_prop: Addr) -> Option<()> {
         let index = self.get_to_space_index(addr)?;
         let priv_addr = self.object_indices.get(index)?.to_owned();
         let object = self.objects.get(&priv_addr)?;
@@ -211,11 +211,11 @@ mod tests {
     #[derive(Debug)]
     struct DummyObject;
     impl Object for DummyObject {
-        fn get_property(&self, _key: &String) -> Option<Addr> {
+        fn get_property(&self, _key: &str) -> Option<Addr> {
             panic!()
         }
 
-        fn set_property(&mut self, _key: &String, _new_prop: Addr) {
+        fn set_property(&mut self, _key: &str, _new_prop: Addr) {
             panic!()
         }
     }
