@@ -1,5 +1,5 @@
 //
 
-pub mod object;
-pub mod memory;
 pub mod interp;
+pub mod memory;
+pub mod object;

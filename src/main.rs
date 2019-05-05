@@ -2,7 +2,8 @@
 
 extern crate shattuck;
 use shattuck::core::interp::Interp;
-use shattuck::objects::{DerivedObject, IntObject};
+use shattuck::objects::derived::DerivedObject;
+use shattuck::objects::int::IntObject;
 
 fn main() {
     let context = Box::new(DerivedObject::new());
@@ -11,7 +12,9 @@ fn main() {
     interp.push_env();
     // let laptop = new DerivedObject()
     // 1. <t1> = new DerivedObject()
-    let t1 = interp.append_object(Box::new(DerivedObject::new())).unwrap();
+    let t1 = interp
+        .append_object(Box::new(DerivedObject::new()))
+        .unwrap();
     // 2. let laptop = <t1>
     interp.insert_name(t1, "laptop");
 
@@ -34,9 +37,9 @@ fn main() {
     interp.set_property(t1, "size", t4);
 
     // print(this.laptop.size)
-    let t5 = interp.context();  // unnecessary
-    let t6 = interp.get_property(t5, "laptop").unwrap();  // unnecessary
-    let t7 = interp.get_property(t6, "size").unwrap();  // unnecessary
+    let t5 = interp.context(); // unnecessary
+    let t6 = interp.get_property(t5, "laptop").unwrap(); // unnecessary
+    let t7 = interp.get_property(t6, "size").unwrap(); // unnecessary
     println!("{:?}", interp.get_object::<IntObject>(t7));
 
     // IntObject(13) should be collected

@@ -1,6 +1,9 @@
 #
 
 language: rust
+install:
+  - rustup component add clippy
 script:
+  - cargo clippy
   - cargo test
   - cargo test -- --ignored

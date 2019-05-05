@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use crate::core::memory::{Addr, Memory};
-use crate::core::object::{Object, as_type};
+use crate::core::object::{as_type, Object};
 
 pub struct Interp {
     mem: Memory,
@@ -84,7 +84,7 @@ impl Name {
         Name(addr)
     }
 
-    pub(crate) fn addr(&self) -> Addr {
+    pub(crate) fn addr(self) -> Addr {
         self.0
     }
 }
@@ -119,7 +119,7 @@ impl Interp {
     }
 
     fn get_object_by_addr<T: 'static>(&self, addr: Addr) -> Option<&T> {
-        as_type::<T>(&**self.mem.get_object(addr)?)
+        as_type::<T>(self.mem.get_object(addr)?)
     }
 
     pub fn get_object<T: 'static>(&self, name: Name) -> Option<&T> {
@@ -143,7 +143,10 @@ impl Interp {
 
     // <name> = env_name
     pub fn find_name(&self, env_name: &str) -> Option<Name> {
-        self.frame_stack.last().unwrap().find_object(&self.mem, env_name)
+        self.frame_stack
+            .last()
+            .unwrap()
+            .find_object(&self.mem, env_name)
     }
 
     // <name> = object.prop
@@ -153,7 +156,8 @@ impl Interp {
 
     // object.prop = <name>
     pub fn set_property(&mut self, object: Name, prop: &str, name: Name) {
-        self.mem.set_object_property(object.addr(), prop, name.addr());
+        self.mem
+            .set_object_property(object.addr(), prop, name.addr());
     }
 
     // <name> = this

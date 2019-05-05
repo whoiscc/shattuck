@@ -5,16 +5,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::core::interp::Name;
 use crate::core::object::Object;
 
-#[derive(Clone, Copy, Hash, Debug)]
+#[derive(Clone, Copy, Hash, Debug, PartialEq, Eq)]
 pub struct Addr(usize);
-
-impl PartialEq for Addr {
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
-}
-
-impl Eq for Addr {}
 
 pub struct Memory {
     max_object_count: usize,
@@ -53,12 +45,14 @@ impl Memory {
         Some(addr)
     }
 
-    pub fn get_object(&self, addr: Addr) -> Option<&Box<dyn Object>> {
-        self.objects.get(&addr)
+    pub fn get_object(&self, addr: Addr) -> Option<&dyn Object> {
+        self.objects.get(&addr).map(|boxed_obj| &**boxed_obj)
     }
 
-    pub fn get_object_mut(&mut self, addr: Addr) -> Option<&mut Box<dyn Object>> {
-        self.objects.get_mut(&addr)
+    pub fn get_object_mut(&mut self, addr: Addr) -> Option<&mut dyn Object> {
+        self.objects
+            .get_mut(&addr)
+            .map(|boxed_obj| &mut **boxed_obj)
     }
 
     pub fn set_root(&mut self, addr: Addr) {
@@ -187,7 +181,7 @@ mod tests {
     }
 
     use crate::core::object::{as_type, check_type};
-    use crate::objects::IntObject;
+    use crate::objects::int::IntObject;
 
     #[test]
     fn same_in_same_out() {
@@ -202,7 +196,7 @@ mod tests {
     }
 
     fn assert_same_int(mem: &Memory, addr: Addr, expect: i64) {
-        let returned_obj = &**mem.get_object(addr).unwrap();
+        let returned_obj = mem.get_object(addr).unwrap();
         assert!(check_type::<IntObject>(returned_obj));
         let returned_int_obj = as_type::<IntObject>(returned_obj).unwrap();
         assert_eq!(*returned_int_obj, IntObject(expect));

@@ -1,7 +1,7 @@
 //
 
-use std::any::Any;
 use crate::core::interp::Name;
+use std::any::Any;
 
 pub trait Object: Any + AsAny {
     fn get_property(&self, key: &str) -> Option<Name>;
