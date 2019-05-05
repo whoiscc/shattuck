@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use crate::core::memory::{Addr, Memory};
 use crate::core::object::{as_type, Object};
+use crate::objects::method::MethodObject;
 
 pub struct Interp {
     mem: Memory,
@@ -168,5 +169,21 @@ impl Interp {
     // this = <name>
     pub fn set_context(&mut self, name: Name) {
         self.context_object = name.addr();
+    }
+
+    // this = <context>; <method>({args}); restore this
+    pub fn run_method(&mut self, context: Name, method: Name) -> Option<()> {
+        let MethodObject(method_ref) = self.get_object(method)?;
+        let method_fn = method_ref.to_owned();
+
+        let backup_context = self.context();
+        self.set_context(context);
+        self.push_frame();
+        self.push_env();
+        method_fn(self);
+        self.pop_env();
+        self.pop_frame();
+        self.set_context(backup_context);
+        Some(())
     }
 }
