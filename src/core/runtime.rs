@@ -8,14 +8,14 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 use crate::core::memory::{Addr, Memory, MemoryError};
 use crate::core::object::Object;
 
-pub struct Interp {
+pub struct Runtime {
     mem: Memory,
     frame_stack: Vec<Frame>,
     context_object: Name,
 }
 
 #[derive(Debug)]
-pub enum InterpError {
+pub enum RuntimeError {
     OutOfMemory,
     UndefinedName(String),
     EmptyEnvStack,
@@ -26,33 +26,33 @@ pub enum InterpError {
     Unhandled(Name),
 }
 
-impl Display for InterpError {
+impl Display for RuntimeError {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
-            InterpError::OutOfMemory => write!(f, "out of memory"),
-            InterpError::UndefinedName(name) => write!(f, "undefined name '{}'", name),
-            InterpError::EmptyEnvStack => write!(f, "poping last layer of env"),
-            InterpError::EmptyFrameStack => write!(f, "poping last layter of frame"),
-            InterpError::TypeMismatch { expected, actual } => {
+            RuntimeError::OutOfMemory => write!(f, "out of memory"),
+            RuntimeError::UndefinedName(name) => write!(f, "undefined name '{}'", name),
+            RuntimeError::EmptyEnvStack => write!(f, "poping last layer of env"),
+            RuntimeError::EmptyFrameStack => write!(f, "poping last layter of frame"),
+            RuntimeError::TypeMismatch { expected, actual } => {
                 write!(f, "expected type {:?}, found {:?}", expected, actual)
             }
-            InterpError::MissingObject(name) => write!(f, "missing object for name '{:?}'", name),
-            InterpError::NotCallable(name) => {
+            RuntimeError::MissingObject(name) => write!(f, "missing object for name '{:?}'", name),
+            RuntimeError::NotCallable(name) => {
                 write!(f, "attempt to call non-callable object '{:?}'", name)
             }
-            InterpError::Unhandled(name) => write!(f, "unhandled error {:?}", name),
+            RuntimeError::Unhandled(name) => write!(f, "unhandled error {:?}", name),
         }
     }
 }
 
-impl Error for InterpError {}
+impl Error for RuntimeError {}
 
-fn append_to(mem: &mut Memory, object: Box<dyn Object>) -> Result<Addr, InterpError> {
+fn append_to(mem: &mut Memory, object: Box<dyn Object>) -> Result<Addr, RuntimeError> {
     match mem.append_object(object) {
         Ok(addr) => Ok(addr),
         Err(mem_err) => {
             if let MemoryError::Full = mem_err {
-                Err(InterpError::OutOfMemory)
+                Err(RuntimeError::OutOfMemory)
             } else {
                 panic!("expected MemoryError::Full, actual: {}", mem_err)
             }
@@ -60,13 +60,13 @@ fn append_to(mem: &mut Memory, object: Box<dyn Object>) -> Result<Addr, InterpEr
     }
 }
 
-fn get_object(mem: &Memory, name: Name) -> Result<&dyn Object, InterpError> {
+fn get_object(mem: &Memory, name: Name) -> Result<&dyn Object, RuntimeError> {
     match mem.get_object(name.addr()) {
         Ok(object) => Ok(object),
         Err(mem_err) => {
             if let MemoryError::InvalidAddr(addr) = mem_err {
                 assert_eq!(addr, name.addr());
-                Err(InterpError::MissingObject(name))
+                Err(RuntimeError::MissingObject(name))
             } else {
                 panic!("expected MemoryError::InvalidAddr, actual: {}", mem_err)
             }
@@ -109,7 +109,7 @@ impl Object for Env {
 }
 
 impl Frame {
-    fn new(mem: &mut Memory, parent: Option<Addr>) -> Result<Self, InterpError> {
+    fn new(mem: &mut Memory, parent: Option<Addr>) -> Result<Self, RuntimeError> {
         let first_env = append_to(mem, Box::new(Env::new()))?;
         let frame = Frame {
             env_stack: vec![first_env],
@@ -122,7 +122,7 @@ impl Frame {
         Ok(frame)
     }
 
-    fn push_env(&mut self, mem: &mut Memory) -> Result<(), InterpError> {
+    fn push_env(&mut self, mem: &mut Memory) -> Result<(), RuntimeError> {
         let env = append_to(mem, Box::new(Env::new()))?;
         mem.hold(env, *self.env_stack.last().expect("env_stack.last()"))
             .expect("env -> prev env");
@@ -131,9 +131,9 @@ impl Frame {
         Ok(())
     }
 
-    fn pop_env(&mut self, mem: &mut Memory) -> Result<(), InterpError> {
+    fn pop_env(&mut self, mem: &mut Memory) -> Result<(), RuntimeError> {
         self.env_stack.pop();
-        mem.set_root(*self.env_stack.last().ok_or(InterpError::EmptyEnvStack)?)
+        mem.set_root(*self.env_stack.last().ok_or(RuntimeError::EmptyEnvStack)?)
             .expect("root <- prev env");
         Ok(())
     }
@@ -152,7 +152,7 @@ impl Frame {
         result
     }
 
-    fn find_object(&self, mem: &Memory, name: &str) -> Result<Name, InterpError> {
+    fn find_object(&self, mem: &Memory, name: &str) -> Result<Name, RuntimeError> {
         for env in self.env_stack.iter().rev() {
             if let Some(object) = mem
                 .get_object(*env)
@@ -162,7 +162,7 @@ impl Frame {
                 return Ok(object);
             }
         }
-        Err(InterpError::UndefinedName(name.to_string()))
+        Err(RuntimeError::UndefinedName(name.to_string()))
     }
 
     fn current_env(&self) -> Addr {
@@ -183,18 +183,18 @@ impl Name {
     }
 }
 
-impl Interp {
-    pub fn new(max_object_count: usize) -> Result<Self, InterpError> {
+impl Runtime {
+    pub fn new(max_object_count: usize) -> Result<Self, RuntimeError> {
         let mut mem = Memory::with_max_object_count(max_object_count);
         let first_frame = Frame::new(&mut mem, None)?;
-        Ok(Interp {
+        Ok(Runtime {
             mem,
             context_object: Name::with_addr(first_frame.current_env()),
             frame_stack: vec![first_frame],
         })
     }
 
-    pub fn push_frame(&mut self) -> Result<(), InterpError> {
+    pub fn push_frame(&mut self) -> Result<(), RuntimeError> {
         let frame = Frame::new(
             &mut self.mem,
             self.frame_stack.last().map(|frame| frame.current_env()),
@@ -203,36 +203,36 @@ impl Interp {
         Ok(())
     }
 
-    pub fn pop_frame(&mut self) -> Result<(), InterpError> {
+    pub fn pop_frame(&mut self) -> Result<(), RuntimeError> {
         self.frame_stack.pop();
         self.mem
             .set_root(
                 self.frame_stack
                     .last()
-                    .ok_or(InterpError::EmptyFrameStack)?
+                    .ok_or(RuntimeError::EmptyFrameStack)?
                     .current_env(),
             )
             .expect("root <- current env");
         Ok(())
     }
 
-    pub fn push_env(&mut self) -> Result<(), InterpError> {
+    pub fn push_env(&mut self) -> Result<(), RuntimeError> {
         let frame = self.frame_stack.last_mut().expect("current frame");
         frame.push_env(&mut self.mem)
     }
 
-    pub fn pop_env(&mut self) -> Result<(), InterpError> {
+    pub fn pop_env(&mut self) -> Result<(), RuntimeError> {
         self.frame_stack
             .last_mut()
             .expect("current frame")
             .pop_env(&mut self.mem)
     }
 
-    pub fn get_object<T: 'static>(&self, name: Name) -> Result<&T, InterpError> {
+    pub fn get_object<T: 'static>(&self, name: Name) -> Result<&T, RuntimeError> {
         let obj = get_object(&self.mem, name)?;
         obj.as_any()
             .downcast_ref::<T>()
-            .ok_or(InterpError::TypeMismatch {
+            .ok_or(RuntimeError::TypeMismatch {
                 expected: TypeId::of::<T>(),
                 actual: obj.as_any().type_id(),
             })
@@ -243,20 +243,20 @@ impl Interp {
     }
 
     // <name> = <object>
-    pub fn append_object(&mut self, object: Box<dyn Object>) -> Result<Name, InterpError> {
+    pub fn append_object(&mut self, object: Box<dyn Object>) -> Result<Name, RuntimeError> {
         Ok(Name::with_addr(append_to(&mut self.mem, object)?))
     }
 
     // env_name = <name>
-    pub fn insert_name(&mut self, name: Name, env_name: &str) -> Result<(), InterpError> {
+    pub fn insert_name(&mut self, name: Name, env_name: &str) -> Result<(), RuntimeError> {
         let frame = self.frame_stack.last().expect("current frame");
         frame
             .insert_object(&mut self.mem, env_name, name.addr())
-            .or(Err(InterpError::MissingObject(name)))
+            .or(Err(RuntimeError::MissingObject(name)))
     }
 
     // <name> = env_name
-    pub fn find_name(&self, env_name: &str) -> Result<Name, InterpError> {
+    pub fn find_name(&self, env_name: &str) -> Result<Name, RuntimeError> {
         self.frame_stack
             .last()
             .expect("current frame")
@@ -264,7 +264,7 @@ impl Interp {
     }
 
     // <name> = object.prop
-    pub fn get_property(&self, object: Name, prop: &str) -> Result<Option<Name>, InterpError> {
+    pub fn get_property(&self, object: Name, prop: &str) -> Result<Option<Name>, RuntimeError> {
         Ok(get_object(&self.mem, object)?.get_property(prop))
     }
 
@@ -274,7 +274,7 @@ impl Interp {
         object: Name,
         prop: &str,
         name: Name,
-    ) -> Result<(), InterpError> {
+    ) -> Result<(), RuntimeError> {
         let result = self
             .mem
             .set_object_property(object.addr(), prop, name.addr());
@@ -283,9 +283,9 @@ impl Interp {
         } else {
             if let Err(MemoryError::InvalidAddr(addr)) = result {
                 if addr == object.addr() {
-                    Err(InterpError::MissingObject(object))
+                    Err(RuntimeError::MissingObject(object))
                 } else if addr == name.addr() {
-                    Err(InterpError::MissingObject(name))
+                    Err(RuntimeError::MissingObject(name))
                 } else {
                     panic!("addr != object && addr != name")
                 }
@@ -306,10 +306,10 @@ impl Interp {
     }
 
     // <method>(&{args})
-    pub fn run_method(&mut self, method: Name) -> Result<(), InterpError> {
+    pub fn run_method(&mut self, method: Name) -> Result<(), RuntimeError> {
         let method_object = get_object(&self.mem, method)?
             .as_method()
-            .ok_or(InterpError::NotCallable(method))?;
+            .ok_or(RuntimeError::NotCallable(method))?;
 
         self.push_frame()?;
         method_object.run(self)?;

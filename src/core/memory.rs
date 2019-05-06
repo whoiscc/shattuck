@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
-use crate::core::interp::Name;
+use crate::core::runtime::Name;
 use crate::core::object::Object;
 
 #[derive(Clone, Copy, Hash, Debug, PartialEq, Eq)]

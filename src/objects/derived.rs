@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::core::interp::Name;
+use crate::core::runtime::Name;
 use crate::core::object::Object;
 
 #[derive(Debug)]

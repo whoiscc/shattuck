@@ -1,7 +1,7 @@
 //
 
 extern crate shattuck;
-use shattuck::core::interp::{Interp, InterpError};
+use shattuck::core::runtime::{Runtime, RuntimeError};
 use shattuck::objects::int::IntObject;
 use shattuck::objects::method::MethodObject;
 
@@ -9,7 +9,7 @@ use shattuck::objects::method::MethodObject;
 struct DummyMethod;
 
 impl MethodObject for DummyMethod {
-    fn run(&self, interp: &mut Interp) -> Result<(), InterpError> {
+    fn run(&self, interp: &mut Runtime) -> Result<(), RuntimeError> {
         println!("I am running!");
         let context: &IntObject = interp.get_object(interp.context())?;
         println!("{:?}", context);
@@ -17,8 +17,8 @@ impl MethodObject for DummyMethod {
     }
 }
 
-fn main() -> Result<(), InterpError> {
-    let mut interp = Interp::new(128)?;
+fn main() -> Result<(), RuntimeError> {
+    let mut interp = Runtime::new(128)?;
     let t0 = interp.append_object(Box::new(IntObject(42)))?;
     let t1 = interp.append_object(Box::new(DummyMethod))?;
     interp.set_context(t0);

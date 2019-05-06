@@ -2,7 +2,7 @@
 
 use std::any::Any;
 
-use crate::core::interp::Name;
+use crate::core::runtime::Name;
 use crate::objects::method::MethodObject;
 
 pub trait Object: Any + AsAny {

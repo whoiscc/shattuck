@@ -1,10 +1,10 @@
 //
 
-use crate::core::interp::{Interp, InterpError};
+use crate::core::runtime::{Runtime, RuntimeError};
 use crate::core::object::Object;
 
 pub trait MethodObject: Object {
-    fn run(&self, interp: &mut Interp) -> Result<(), InterpError>;
+    fn run(&self, runtime: &mut Runtime) -> Result<(), RuntimeError>;
 }
 
 impl<T: 'static + MethodObject + Clone> Object for T {
