@@ -1,7 +1,9 @@
 //
 
+use std::error::Error;
 use std::any::TypeId;
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter, Result as FmtResult};
 
 use crate::core::memory::{Addr, Memory, MemoryError};
 use crate::core::object::Object;
@@ -21,7 +23,29 @@ pub enum InterpError {
     TypeMismatch { expected: TypeId, actual: TypeId },
     MissingObject(Name),
     NotCallable(Name),
+    Unhandled(Name),
 }
+
+impl Display for InterpError {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        match self {
+            InterpError::OutOfMemory => write!(f, "out of memory"),
+            InterpError::UndefinedName(name) => write!(f, "undefined name '{}'", name),
+            InterpError::EmptyEnvStack => write!(f, "poping last layer of env"),
+            InterpError::EmptyFrameStack => write!(f, "poping last layter of frame"),
+            InterpError::TypeMismatch { expected, actual } => {
+                write!(f, "expected type {:?}, found {:?}", expected, actual)
+            }
+            InterpError::MissingObject(name) => write!(f, "missing object for name '{:?}'", name),
+            InterpError::NotCallable(name) => {
+                write!(f, "attempt to call non-callable object '{:?}'", name)
+            }
+            InterpError::Unhandled(name) => write!(f, "unhandled error {:?}", name),
+        }
+    }
+}
+
+impl Error for InterpError {}
 
 fn append_to(mem: &mut Memory, object: Box<dyn Object>) -> Result<Addr, InterpError> {
     match mem.append_object(object) {
@@ -181,12 +205,14 @@ impl Interp {
 
     pub fn pop_frame(&mut self) -> Result<(), InterpError> {
         self.frame_stack.pop();
-        self.mem.set_root(
-            self.frame_stack
-                .last()
-                .ok_or(InterpError::EmptyFrameStack)?
-                .current_env(),
-        ).expect("root <- current env");
+        self.mem
+            .set_root(
+                self.frame_stack
+                    .last()
+                    .ok_or(InterpError::EmptyFrameStack)?
+                    .current_env(),
+            )
+            .expect("root <- current env");
         Ok(())
     }
 
