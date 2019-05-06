@@ -11,7 +11,7 @@ use crate::core::object::Object;
 pub struct Runtime {
     mem: Memory,
     frame_stack: Vec<Frame>,
-    context_object: Name,
+    context_object: Pointer,
 }
 
 #[derive(Debug)]
@@ -21,16 +21,17 @@ pub enum RuntimeError {
     EmptyEnvStack,
     EmptyFrameStack,
     TypeMismatch { expected: TypeId, actual: TypeId },
-    MissingObject(Name),
-    NotCallable(Name),
-    Unhandled(Name),
+    MissingObject(Pointer),
+    NotCallable(Pointer),
+    Unhandled(Pointer),
+    NoSuchProp(Pointer, String),
 }
 
 impl From<MemoryError> for RuntimeError {
     fn from(mem_err: MemoryError) -> Self {
         match mem_err {
             MemoryError::Full => RuntimeError::OutOfMemory,
-            MemoryError::InvalidAddr(addr) => RuntimeError::MissingObject(Name::with_addr(addr)),
+            MemoryError::InvalidAddr(addr) => RuntimeError::MissingObject(Pointer::with_addr(addr)),
         }
     }
 }
@@ -39,17 +40,20 @@ impl Display for RuntimeError {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
             RuntimeError::OutOfMemory => write!(f, "out of memory"),
-            RuntimeError::UndefinedName(name) => write!(f, "undefined name '{}'", name),
+            RuntimeError::UndefinedName(pointer) => write!(f, "undefined pointer '{}'", pointer),
             RuntimeError::EmptyEnvStack => write!(f, "poping last layer of env"),
             RuntimeError::EmptyFrameStack => write!(f, "poping last layter of frame"),
             RuntimeError::TypeMismatch { expected, actual } => {
                 write!(f, "expected type {:?}, found {:?}", expected, actual)
             }
-            RuntimeError::MissingObject(name) => write!(f, "missing object for name '{:?}'", name),
-            RuntimeError::NotCallable(name) => {
-                write!(f, "attempt to call non-callable object '{:?}'", name)
+            RuntimeError::MissingObject(pointer) => write!(f, "missing object for pointer '{:?}'", pointer),
+            RuntimeError::NotCallable(pointer) => {
+                write!(f, "attempt to call non-callable object '{:?}'", pointer)
             }
-            RuntimeError::Unhandled(name) => write!(f, "unhandled error {:?}", name),
+            RuntimeError::Unhandled(pointer) => write!(f, "unhandled error {:?}", pointer),
+            RuntimeError::NoSuchProp(pointer, prop_key) => {
+                write!(f, "object '{:?}' don't have property {}", pointer, prop_key)
+            }
         }
     }
 }
@@ -71,21 +75,21 @@ impl Env {
         }
     }
 
-    fn find_object(&self, name: &str) -> Option<Addr> {
-        self.name_map.get(name).cloned()
+    fn find_object(&self, pointer: &str) -> Option<Addr> {
+        self.name_map.get(pointer).cloned()
     }
 
-    fn insert_object(&mut self, name: &str, object: Addr) {
-        self.name_map.insert(name.to_string(), object);
+    fn insert_object(&mut self, pointer: &str, object: Addr) {
+        self.name_map.insert(pointer.to_string(), object);
     }
 }
 
 impl Object for Env {
-    fn get_property(&self, key: &str) -> Option<Name> {
-        Some(Name::with_addr(self.find_object(key)?))
+    fn get_property(&self, key: &str) -> Option<Pointer> {
+        Some(Pointer::with_addr(self.find_object(key)?))
     }
 
-    fn set_property(&mut self, key: &str, new_prop: Name) {
+    fn set_property(&mut self, key: &str, new_prop: Pointer) {
         self.insert_object(key, new_prop.addr());
     }
 }
@@ -120,21 +124,21 @@ impl Frame {
         Ok(())
     }
 
-    fn insert_object(&self, mem: &mut Memory, name: &str, object: Addr) -> Result<(), MemoryError> {
-        mem.set_object_property(self.current_env(), name, object)
+    fn insert_object(&self, mem: &mut Memory, pointer: &str, object: Addr) -> Result<(), MemoryError> {
+        mem.set_object_property(self.current_env(), pointer, object)
     }
 
-    fn find_object(&self, mem: &Memory, name: &str) -> Result<Name, RuntimeError> {
+    fn find_object(&self, mem: &Memory, pointer: &str) -> Result<Pointer, RuntimeError> {
         for env in self.env_stack.iter().rev() {
             if let Some(object) = mem
                 .get_object(*env)
                 .expect("env in env_stack")
-                .get_property(name)
+                .get_property(pointer)
             {
                 return Ok(object);
             }
         }
-        Err(RuntimeError::UndefinedName(name.to_string()))
+        Err(RuntimeError::UndefinedName(pointer.to_string()))
     }
 
     fn current_env(&self) -> Addr {
@@ -143,11 +147,11 @@ impl Frame {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Name(Addr);
+pub struct Pointer(Addr);
 
-impl Name {
+impl Pointer {
     pub(crate) fn with_addr(addr: Addr) -> Self {
-        Name(addr)
+        Pointer(addr)
     }
 
     pub(crate) fn addr(self) -> Addr {
@@ -161,7 +165,7 @@ impl Runtime {
         let first_frame = Frame::new(&mut mem, None)?;
         Ok(Runtime {
             mem,
-            context_object: Name::with_addr(first_frame.current_env()),
+            context_object: Pointer::with_addr(first_frame.current_env()),
             frame_stack: vec![first_frame],
         })
     }
@@ -200,70 +204,72 @@ impl Runtime {
             .pop_env(&mut self.mem)
     }
 
-    pub fn get_object<T: 'static>(&self, name: Name) -> Result<&T, RuntimeError> {
-        let obj = self.mem.get_object(name.addr())?;
-        obj.as_any()
-            .downcast_ref::<T>()
-            .ok_or(RuntimeError::TypeMismatch {
-                expected: TypeId::of::<T>(),
-                actual: obj.as_any().type_id(),
-            })
+    pub fn get_object<T: 'static>(&self, pointer: Pointer) -> Result<&T, RuntimeError> {
+        let obj = self.mem.get_object(pointer.addr())?.as_any();
+        obj.downcast_ref::<T>().ok_or(RuntimeError::TypeMismatch {
+            expected: TypeId::of::<T>(),
+            actual: obj.type_id(),
+        })
     }
 
     pub fn garbage_collect(&mut self) {
         self.mem.collect();
     }
 
-    // <name> = <object>
-    pub fn append_object(&mut self, object: Box<dyn Object>) -> Result<Name, RuntimeError> {
-        Ok(Name::with_addr(self.mem.append_object(object)?))
+    // <pointer> = <object>
+    pub fn append_object(&mut self, object: Box<dyn Object>) -> Result<Pointer, RuntimeError> {
+        Ok(Pointer::with_addr(self.mem.append_object(object)?))
     }
 
-    // env_name = <name>
-    pub fn insert_name(&mut self, name: Name, env_name: &str) -> Result<(), RuntimeError> {
+    // env_name = <pointer>
+    pub fn insert_name(&mut self, pointer: Pointer, env_name: &str) -> Result<(), RuntimeError> {
         let frame = self.frame_stack.last().expect("current frame");
         frame
-            .insert_object(&mut self.mem, env_name, name.addr())
+            .insert_object(&mut self.mem, env_name, pointer.addr())
             .map_err(Into::into)
     }
 
-    // <name> = env_name
-    pub fn find_name(&self, env_name: &str) -> Result<Name, RuntimeError> {
+    // <pointer> = env_name
+    pub fn find_name(&self, env_name: &str) -> Result<Pointer, RuntimeError> {
         self.frame_stack
             .last()
             .expect("current frame")
             .find_object(&self.mem, env_name)
     }
 
-    // <name> = object.prop
-    pub fn get_property(&self, object: Name, prop: &str) -> Result<Option<Name>, RuntimeError> {
-        Ok(self.mem.get_object(object.addr())?.get_property(prop))
+    // <pointer> = object.prop
+    pub fn get_property(&self, object: Pointer, prop: &str) -> Result<Pointer, RuntimeError> {
+        Ok(self
+            .mem
+            .get_object(object.addr())?
+            .get_property(prop)
+            .ok_or_else(|| RuntimeError::NoSuchProp(object, prop.to_string()))?)
     }
 
-    // object.prop = <name>
+    // object.prop = <pointer>
     pub fn set_property(
         &mut self,
-        object: Name,
+        object: Pointer,
         prop: &str,
-        name: Name,
+        pointer: Pointer,
     ) -> Result<(), RuntimeError> {
         self.mem
-            .set_object_property(object.addr(), prop, name.addr())
+            .set_object_property(object.addr(), prop, pointer.addr())
             .map_err(Into::into)
     }
 
-    // <name> = this
-    pub fn context(&self) -> Name {
+    // <pointer> = this
+    pub fn context(&self) -> Pointer {
         self.context_object
     }
 
-    // this = <name>
-    pub fn set_context(&mut self, name: Name) {
-        self.context_object = name;
+    // this = <pointer>
+    pub fn set_context(&mut self, pointer: Pointer) {
+        self.context_object = pointer;
     }
 
     // <method>(&{args})
-    pub fn run_method(&mut self, method: Name) -> Result<(), RuntimeError> {
+    pub fn run_method(&mut self, method: Pointer) -> Result<(), RuntimeError> {
         let method_object = self
             .mem
             .get_object(method.addr())?

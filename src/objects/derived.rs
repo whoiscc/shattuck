@@ -3,11 +3,11 @@
 use std::collections::HashMap;
 
 use crate::core::object::Object;
-use crate::core::runtime::Name;
+use crate::core::runtime::Pointer;
 
 #[derive(Debug)]
 pub struct DerivedObject {
-    props: HashMap<String, Name>,
+    props: HashMap<String, Pointer>,
 }
 
 impl DerivedObject {
@@ -17,11 +17,11 @@ impl DerivedObject {
         }
     }
 
-    pub fn get_property(&self, key: &str) -> Option<Name> {
+    pub fn get_property(&self, key: &str) -> Option<Pointer> {
         self.props.get(key).cloned()
     }
 
-    pub fn set_property(&mut self, key: &str, new_prop: Name) {
+    pub fn set_property(&mut self, key: &str, new_prop: Pointer) {
         // TODO: old prop checking
         self.props.insert(key.to_string(), new_prop);
     }
@@ -34,11 +34,11 @@ impl Default for DerivedObject {
 }
 
 impl Object for DerivedObject {
-    fn get_property(&self, key: &str) -> Option<Name> {
+    fn get_property(&self, key: &str) -> Option<Pointer> {
         self.get_property(key)
     }
 
-    fn set_property(&mut self, key: &str, new_prop: Name) {
+    fn set_property(&mut self, key: &str, new_prop: Pointer) {
         self.set_property(key, new_prop)
     }
 }

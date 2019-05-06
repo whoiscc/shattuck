@@ -5,7 +5,7 @@ use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
 use crate::core::object::Object;
-use crate::core::runtime::Name;
+use crate::core::runtime::Pointer;
 
 #[derive(Clone, Copy, Hash, Debug, PartialEq, Eq)]
 pub struct Addr(usize);
@@ -155,7 +155,7 @@ impl Memory {
             self.drop(addr, old_prop.addr())?;
         }
         let object_mut = self.get_object_mut(addr)?;
-        object_mut.set_property(key, Name::with_addr(new_prop));
+        object_mut.set_property(key, Pointer::with_addr(new_prop));
         self.hold(addr, new_prop)?;
         Ok(())
     }
@@ -168,11 +168,11 @@ mod tests {
     #[derive(Debug)]
     struct DummyObject;
     impl Object for DummyObject {
-        fn get_property(&self, _key: &str) -> Option<Name> {
+        fn get_property(&self, _key: &str) -> Option<Pointer> {
             panic!()
         }
 
-        fn set_property(&mut self, _key: &str, _new_prop: Name) {
+        fn set_property(&mut self, _key: &str, _new_prop: Pointer) {
             panic!()
         }
     }
