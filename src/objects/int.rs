@@ -1,7 +1,7 @@
 //
 
-use crate::core::runtime::Name;
 use crate::core::object::Object;
+use crate::core::runtime::Name;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct IntObject(pub i64);

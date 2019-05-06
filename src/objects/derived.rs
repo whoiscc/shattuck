@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use crate::core::runtime::Name;
 use crate::core::object::Object;
+use crate::core::runtime::Name;
 
 #[derive(Debug)]
 pub struct DerivedObject {

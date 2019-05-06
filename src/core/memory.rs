@@ -4,8 +4,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
-use crate::core::runtime::Name;
 use crate::core::object::Object;
+use crate::core::runtime::Name;
 
 #[derive(Clone, Copy, Hash, Debug, PartialEq, Eq)]
 pub struct Addr(usize);
@@ -68,14 +68,14 @@ impl Memory {
         self.objects
             .get(&addr)
             .map(|boxed_obj| &**boxed_obj)
-            .ok_or(MemoryError::InvalidAddr(addr))
+            .ok_or_else(|| MemoryError::InvalidAddr(addr))
     }
 
     pub fn get_object_mut(&mut self, addr: Addr) -> Result<&mut dyn Object, MemoryError> {
         self.objects
             .get_mut(&addr)
             .map(|boxed_obj| &mut **boxed_obj)
-            .ok_or(MemoryError::InvalidAddr(addr))
+            .ok_or_else(|| MemoryError::InvalidAddr(addr))
     }
 
     pub fn set_root(&mut self, addr: Addr) -> Result<(), MemoryError> {
@@ -88,7 +88,7 @@ impl Memory {
         self.get_object(holdee)?;
         self.ref_map
             .get_mut(&holder)
-            .ok_or(MemoryError::InvalidAddr(holder))?
+            .ok_or_else(|| MemoryError::InvalidAddr(holder))?
             .insert(holdee);
         Ok(())
     }
@@ -96,7 +96,7 @@ impl Memory {
     pub fn drop(&mut self, holder: Addr, holdee: Addr) -> Result<(), MemoryError> {
         self.ref_map
             .get_mut(&holder)
-            .ok_or(MemoryError::InvalidAddr(holder))?
+            .ok_or_else(|| MemoryError::InvalidAddr(holder))?
             .remove(&holdee);
         Ok(())
     }

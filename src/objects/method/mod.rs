@@ -1,7 +1,7 @@
 //
 
-use crate::core::runtime::{Runtime, RuntimeError};
 use crate::core::object::Object;
+use crate::core::runtime::{Runtime, RuntimeError};
 
 pub trait MethodObject: Object {
     fn run(&self, runtime: &mut Runtime) -> Result<(), RuntimeError>;

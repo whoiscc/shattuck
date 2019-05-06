@@ -1,8 +1,8 @@
 //
 
-use std::error::Error;
 use std::any::TypeId;
 use std::collections::HashMap;
+use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
 use crate::core::memory::{Addr, Memory, MemoryError};
@@ -26,6 +26,15 @@ pub enum RuntimeError {
     Unhandled(Name),
 }
 
+impl From<MemoryError> for RuntimeError {
+    fn from(mem_err: MemoryError) -> Self {
+        match mem_err {
+            MemoryError::Full => RuntimeError::OutOfMemory,
+            MemoryError::InvalidAddr(addr) => RuntimeError::MissingObject(Name::with_addr(addr)),
+        }
+    }
+}
+
 impl Display for RuntimeError {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
@@ -46,33 +55,6 @@ impl Display for RuntimeError {
 }
 
 impl Error for RuntimeError {}
-
-fn append_to(mem: &mut Memory, object: Box<dyn Object>) -> Result<Addr, RuntimeError> {
-    match mem.append_object(object) {
-        Ok(addr) => Ok(addr),
-        Err(mem_err) => {
-            if let MemoryError::Full = mem_err {
-                Err(RuntimeError::OutOfMemory)
-            } else {
-                panic!("expected MemoryError::Full, actual: {}", mem_err)
-            }
-        }
-    }
-}
-
-fn get_object(mem: &Memory, name: Name) -> Result<&dyn Object, RuntimeError> {
-    match mem.get_object(name.addr()) {
-        Ok(object) => Ok(object),
-        Err(mem_err) => {
-            if let MemoryError::InvalidAddr(addr) = mem_err {
-                assert_eq!(addr, name.addr());
-                Err(RuntimeError::MissingObject(name))
-            } else {
-                panic!("expected MemoryError::InvalidAddr, actual: {}", mem_err)
-            }
-        }
-    }
-}
 
 struct Frame {
     env_stack: Vec<Addr>,
@@ -110,7 +92,7 @@ impl Object for Env {
 
 impl Frame {
     fn new(mem: &mut Memory, parent: Option<Addr>) -> Result<Self, RuntimeError> {
-        let first_env = append_to(mem, Box::new(Env::new()))?;
+        let first_env = mem.append_object(Box::new(Env::new()))?;
         let frame = Frame {
             env_stack: vec![first_env],
         };
@@ -123,7 +105,7 @@ impl Frame {
     }
 
     fn push_env(&mut self, mem: &mut Memory) -> Result<(), RuntimeError> {
-        let env = append_to(mem, Box::new(Env::new()))?;
+        let env = mem.append_object(Box::new(Env::new()))?;
         mem.hold(env, *self.env_stack.last().expect("env_stack.last()"))
             .expect("env -> prev env");
         mem.set_root(env).expect("root <- env");
@@ -139,17 +121,7 @@ impl Frame {
     }
 
     fn insert_object(&self, mem: &mut Memory, name: &str, object: Addr) -> Result<(), MemoryError> {
-        let result = mem.set_object_property(self.current_env(), name, object);
-        if let Ok(_) = result {
-            return Ok(());
-        } else {
-            if let Err(MemoryError::InvalidAddr(addr)) = result {
-                assert_eq!(addr, object);
-            } else {
-                panic!("expected MemoryError::InvalidAddr, get {:?}", result)
-            }
-        }
-        result
+        mem.set_object_property(self.current_env(), name, object)
     }
 
     fn find_object(&self, mem: &Memory, name: &str) -> Result<Name, RuntimeError> {
@@ -197,7 +169,7 @@ impl Runtime {
     pub fn push_frame(&mut self) -> Result<(), RuntimeError> {
         let frame = Frame::new(
             &mut self.mem,
-            self.frame_stack.last().map(|frame| frame.current_env()),
+            self.frame_stack.last().map(Frame::current_env),
         )?;
         self.frame_stack.push(frame);
         Ok(())
@@ -229,7 +201,7 @@ impl Runtime {
     }
 
     pub fn get_object<T: 'static>(&self, name: Name) -> Result<&T, RuntimeError> {
-        let obj = get_object(&self.mem, name)?;
+        let obj = self.mem.get_object(name.addr())?;
         obj.as_any()
             .downcast_ref::<T>()
             .ok_or(RuntimeError::TypeMismatch {
@@ -244,7 +216,7 @@ impl Runtime {
 
     // <name> = <object>
     pub fn append_object(&mut self, object: Box<dyn Object>) -> Result<Name, RuntimeError> {
-        Ok(Name::with_addr(append_to(&mut self.mem, object)?))
+        Ok(Name::with_addr(self.mem.append_object(object)?))
     }
 
     // env_name = <name>
@@ -252,7 +224,7 @@ impl Runtime {
         let frame = self.frame_stack.last().expect("current frame");
         frame
             .insert_object(&mut self.mem, env_name, name.addr())
-            .or(Err(RuntimeError::MissingObject(name)))
+            .map_err(Into::into)
     }
 
     // <name> = env_name
@@ -265,7 +237,7 @@ impl Runtime {
 
     // <name> = object.prop
     pub fn get_property(&self, object: Name, prop: &str) -> Result<Option<Name>, RuntimeError> {
-        Ok(get_object(&self.mem, object)?.get_property(prop))
+        Ok(self.mem.get_object(object.addr())?.get_property(prop))
     }
 
     // object.prop = <name>
@@ -275,24 +247,9 @@ impl Runtime {
         prop: &str,
         name: Name,
     ) -> Result<(), RuntimeError> {
-        let result = self
-            .mem
-            .set_object_property(object.addr(), prop, name.addr());
-        if let Ok(_) = result {
-            Ok(())
-        } else {
-            if let Err(MemoryError::InvalidAddr(addr)) = result {
-                if addr == object.addr() {
-                    Err(RuntimeError::MissingObject(object))
-                } else if addr == name.addr() {
-                    Err(RuntimeError::MissingObject(name))
-                } else {
-                    panic!("addr != object && addr != name")
-                }
-            } else {
-                panic!("expected MemoryError::InvalidAddr, get {:?}", result)
-            }
-        }
+        self.mem
+            .set_object_property(object.addr(), prop, name.addr())
+            .map_err(Into::into)
     }
 
     // <name> = this
@@ -307,9 +264,11 @@ impl Runtime {
 
     // <method>(&{args})
     pub fn run_method(&mut self, method: Name) -> Result<(), RuntimeError> {
-        let method_object = get_object(&self.mem, method)?
+        let method_object = self
+            .mem
+            .get_object(method.addr())?
             .as_method()
-            .ok_or(RuntimeError::NotCallable(method))?;
+            .ok_or_else(|| RuntimeError::NotCallable(method))?;
 
         self.push_frame()?;
         method_object.run(self)?;
