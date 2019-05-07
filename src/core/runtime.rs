@@ -1,9 +1,12 @@
 //
 
 use std::any::TypeId;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::thread;
+use std::thread::ThreadId;
 
 use crate::core::memory::{Addr, Memory, MemoryError};
 use crate::core::object::Object;
@@ -46,7 +49,9 @@ impl Display for RuntimeError {
             RuntimeError::TypeMismatch { expected, actual } => {
                 write!(f, "expected type {:?}, found {:?}", expected, actual)
             }
-            RuntimeError::MissingObject(pointer) => write!(f, "missing object for pointer '{:?}'", pointer),
+            RuntimeError::MissingObject(pointer) => {
+                write!(f, "missing object for pointer '{:?}'", pointer)
+            }
             RuntimeError::NotCallable(pointer) => {
                 write!(f, "attempt to call non-callable object '{:?}'", pointer)
             }
@@ -124,7 +129,12 @@ impl Frame {
         Ok(())
     }
 
-    fn insert_object(&self, mem: &mut Memory, pointer: &str, object: Addr) -> Result<(), MemoryError> {
+    fn insert_object(
+        &self,
+        mem: &mut Memory,
+        pointer: &str,
+        object: Addr,
+    ) -> Result<(), MemoryError> {
         mem.set_object_property(self.current_env(), pointer, object)
     }
 
@@ -147,27 +157,29 @@ impl Frame {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Pointer(Addr);
+pub struct Pointer(ThreadId, Addr);
 
 impl Pointer {
     pub(crate) fn with_addr(addr: Addr) -> Self {
-        Pointer(addr)
+        Pointer(thread::current().id(), addr)
     }
 
     pub(crate) fn addr(self) -> Addr {
-        self.0
+        let Pointer(_, addr) = self;
+        addr
     }
 }
 
 impl Runtime {
-    pub fn new(max_object_count: usize) -> Result<Self, RuntimeError> {
+    pub fn new(max_object_count: usize) -> Result<RefCell<Self>, RuntimeError> {
         let mut mem = Memory::with_max_object_count(max_object_count);
         let first_frame = Frame::new(&mut mem, None)?;
-        Ok(Runtime {
+        let runtime = RefCell::new(Runtime {
             mem,
             context_object: Pointer::with_addr(first_frame.current_env()),
             frame_stack: vec![first_frame],
-        })
+        });
+        Ok(runtime)
     }
 
     pub fn push_frame(&mut self) -> Result<(), RuntimeError> {
@@ -269,16 +281,43 @@ impl Runtime {
     }
 
     // <method>(&{args})
-    pub fn run_method(&mut self, method: Pointer) -> Result<(), RuntimeError> {
-        let method_object = self
+    pub fn run_method(
+        manager: &RefCell<RuntimeManager>,
+        method: Pointer,
+    ) -> Result<(), RuntimeError> {
+        let current = thread::current().id();
+        let method_object = manager.borrow().get(current)
+            .borrow()
             .mem
             .get_object(method.addr())?
             .as_method()
             .ok_or_else(|| RuntimeError::NotCallable(method))?;
 
-        self.push_frame()?;
-        method_object.run(self)?;
-        self.pop_frame()?;
+        manager.borrow().get(current).borrow_mut().push_frame()?;
+        method_object.run(&manager)?;
+        manager.borrow().get(current).borrow_mut().pop_frame()?;
         Ok(())
+    }
+}
+
+pub struct RuntimeManager {
+    runtime_map: HashMap<ThreadId, RefCell<Runtime>>,
+}
+
+impl RuntimeManager {
+    pub fn new() -> Self {
+        RuntimeManager {
+            runtime_map: HashMap::new(),
+        }
+    }
+
+    pub fn create(&mut self, max_object_count: usize) -> Result<(), RuntimeError> {
+        let runtime = Runtime::new(max_object_count)?;
+        self.runtime_map.insert(thread::current().id(), runtime);
+        Ok(())
+    }
+
+    pub fn get(&self, thread_id: ThreadId) -> &RefCell<Runtime> {
+        self.runtime_map.get(&thread_id).expect("runtime on current thread")
     }
 }

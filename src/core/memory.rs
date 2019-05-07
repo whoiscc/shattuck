@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::thread;
 
 use crate::core::object::Object;
 use crate::core::runtime::Pointer;
@@ -131,7 +132,8 @@ impl Memory {
 
         let alive_count = self.objects.len();
         println!(
-            "<shattuck> garbage collected, {} alive, {} dead, duration: {} ms",
+            "<shattuck> {:?} garbage collected, {} alive, {} dead, duration: {} ms",
+            thread::current().id(),
             alive_count,
             dead_count,
             now.elapsed().as_micros() as f64 / 1000.0

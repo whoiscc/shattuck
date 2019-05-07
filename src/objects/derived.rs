@@ -22,7 +22,6 @@ impl DerivedObject {
     }
 
     pub fn set_property(&mut self, key: &str, new_prop: Pointer) {
-        // TODO: old prop checking
         self.props.insert(key.to_string(), new_prop);
     }
 }
