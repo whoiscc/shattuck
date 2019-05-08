@@ -1,6 +1,5 @@
 //
 
-extern crate shattuck;
 use shattuck::core::runtime::{Runtime, RuntimeError, RuntimeManager};
 use shattuck::objects::int::IntObject;
 use shattuck::objects::method::MethodObject;
@@ -14,7 +13,7 @@ impl MethodObject for DummyMethod {
     fn run(&self, manager: &RefCell<RuntimeManager>) -> Result<(), RuntimeError> {
         println!("I am running!");
         let borrowed_manager = manager.borrow();
-        let runtime = borrowed_manager.get(thread::current().id()).borrow();
+        let runtime = borrowed_manager.get(thread::current().id())?.borrow();
         let context: &IntObject = runtime.get_object(runtime.context())?;
         println!("{:?}", context);
         Ok(())
@@ -26,7 +25,7 @@ fn main() -> Result<(), RuntimeError> {
     manager.borrow_mut().create(128)?;
 
     let borrowed_manager = manager.borrow();
-    let runtime = borrowed_manager.get(thread::current().id());
+    let runtime = borrowed_manager.get(thread::current().id())?;
     let t0 = runtime
         .borrow_mut()
         .append_object(Box::new(IntObject(42)))?;

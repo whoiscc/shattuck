@@ -28,6 +28,7 @@ pub enum RuntimeError {
     NotCallable(Pointer),
     Unhandled(Pointer),
     NoSuchProp(Pointer, String),
+    UninitializedThread(ThreadId),
 }
 
 impl From<MemoryError> for RuntimeError {
@@ -58,6 +59,9 @@ impl Display for RuntimeError {
             RuntimeError::Unhandled(pointer) => write!(f, "unhandled error {:?}", pointer),
             RuntimeError::NoSuchProp(pointer, prop_key) => {
                 write!(f, "object '{:?}' don't have property {}", pointer, prop_key)
+            }
+            RuntimeError::UninitializedThread(thread_id) => {
+                write!(f, "cannot find runtime on {:?}", thread_id)
             }
         }
     }
@@ -286,16 +290,18 @@ impl Runtime {
         method: Pointer,
     ) -> Result<(), RuntimeError> {
         let current = thread::current().id();
-        let method_object = manager.borrow().get(current)
+        let method_object = manager
+            .borrow()
+            .get(current)?
             .borrow()
             .mem
             .get_object(method.addr())?
             .as_method()
             .ok_or_else(|| RuntimeError::NotCallable(method))?;
 
-        manager.borrow().get(current).borrow_mut().push_frame()?;
+        manager.borrow().get(current)?.borrow_mut().push_frame()?;
         method_object.run(&manager)?;
-        manager.borrow().get(current).borrow_mut().pop_frame()?;
+        manager.borrow().get(current)?.borrow_mut().pop_frame()?;
         Ok(())
     }
 }
@@ -317,7 +323,15 @@ impl RuntimeManager {
         Ok(())
     }
 
-    pub fn get(&self, thread_id: ThreadId) -> &RefCell<Runtime> {
-        self.runtime_map.get(&thread_id).expect("runtime on current thread")
+    pub fn get(&self, thread_id: ThreadId) -> Result<&RefCell<Runtime>, RuntimeError> {
+        self.runtime_map
+            .get(&thread_id)
+            .ok_or_else(|| RuntimeError::UninitializedThread(thread_id))
+    }
+}
+
+impl Default for RuntimeManager {
+    fn default() -> Self {
+        RuntimeManager::new()
     }
 }
