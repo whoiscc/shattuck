@@ -196,15 +196,17 @@ impl Runtime {
     }
 
     pub fn pop_frame(&mut self) -> Result<(), RuntimeError> {
+        let holder_env = self.frame_stack.last().unwrap().current_env();
         self.frame_stack.pop();
-        self.mem
-            .set_root(
-                self.frame_stack
-                    .last()
-                    .ok_or(RuntimeError::EmptyFrameStack)?
-                    .current_env(),
-            )
-            .expect("root <- current env");
+        let holdee_env = self
+            .frame_stack
+            .last()
+            .ok_or(RuntimeError::EmptyFrameStack)?
+            .current_env();
+        // if holder_env keeps alive because returned closure, it should not cause holdee_env
+        // to be alive because holdee_env is invisible to the closure
+        self.mem.drop(holder_env, holdee_env)?;
+        self.mem.set_root(holdee_env).expect("root <- current env");
         Ok(())
     }
 
