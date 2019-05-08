@@ -1,11 +1,10 @@
 //
 
-use std::cell::RefCell;
 use crate::core::object::Object;
-use crate::core::runtime::{RuntimeManager, RuntimeError};
+use crate::core::runtime::{Runtime, RuntimeError};
 
 pub trait MethodObject: Object {
-    fn run(&self, manager: &RefCell<RuntimeManager>) -> Result<(), RuntimeError>;
+    fn run(&self, runtime: &mut Runtime) -> Result<(), RuntimeError>;
 }
 
 impl<T: 'static + MethodObject + Clone> Object for T {

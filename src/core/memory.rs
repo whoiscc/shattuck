@@ -102,11 +102,7 @@ impl Memory {
     }
 
     pub fn collect(&mut self) {
-        use std::thread;
         use std::time::Instant;
-
-        let current = thread::current().id();
-        println!("<shattuck> {:?} start garbage collecting", current);
         let now = Instant::now();
 
         let mut queue = VecDeque::<Addr>::new();
@@ -135,8 +131,7 @@ impl Memory {
 
         let alive_count = self.objects.len();
         println!(
-            "<shattuck> {:?} garbage collected, {} alive, {} dead, duration: {} ms",
-            current,
+            "<shattuck> garbage collected, {} alive, {} dead, duration: {} ms",
             alive_count,
             dead_count,
             now.elapsed().as_micros() as f64 / 1000.0
