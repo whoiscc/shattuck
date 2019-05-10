@@ -2,6 +2,7 @@
 
 extern crate shattuck;
 use shattuck::core::runtime::{Runtime, RuntimeError};
+use shattuck::core::runtime_pool::RuntimePool;
 use shattuck::objects::int::IntObject;
 use shattuck::objects::method::MethodObject;
 
@@ -17,12 +18,17 @@ impl MethodObject for DummyMethod {
     }
 }
 
-fn main() -> Result<(), RuntimeError> {
-    let mut interp = Runtime::new(128)?;
-    let t0 = interp.append_object(Box::new(IntObject(42)))?;
-    let t1 = interp.append_object(Box::new(DummyMethod))?;
-    interp.set_context(t0);
-    interp.run_method(t1)?;
-    interp.garbage_collect();
-    Ok(())
+fn main() {
+    let mut pool = RuntimePool::new();
+    let runtime_id = pool.create_runtime(128).unwrap();
+    let mut borrowed_runtime = pool.borrow_mut(runtime_id).unwrap();
+    let t0 = borrowed_runtime
+        .append_object(Box::new(IntObject(42)))
+        .unwrap();
+    let t1 = borrowed_runtime
+        .append_object(Box::new(DummyMethod))
+        .unwrap();
+    borrowed_runtime.set_context(t0);
+    borrowed_runtime.run_method(t1).unwrap();
+    borrowed_runtime.garbage_collect();
 }

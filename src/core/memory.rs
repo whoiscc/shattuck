@@ -31,7 +31,7 @@ pub enum MemoryError {
 impl Display for MemoryError {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
-            MemoryError::Full => write!(f, "momery is full"),
+            MemoryError::Full => write!(f, "memory is full"),
             MemoryError::InvalidAddr(_) => write!(f, "access invalid address"),
         }
     }
