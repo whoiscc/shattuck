@@ -2,6 +2,11 @@
 
 use std::cell::{BorrowError, BorrowMutError, Ref, RefCell, RefMut};
 
+extern crate crossbeam;
+use crossbeam::sync::ShardedLock;
+
+pub type SharedRuntimes = ShardedLock<RuntimePool>;
+
 use crate::core::runtime::{Runtime, RuntimeError};
 use std::collections::HashMap;
 use std::error::Error;
@@ -47,11 +52,11 @@ impl Display for RuntimePoolError {
 impl Error for RuntimePoolError {}
 
 impl RuntimePool {
-    pub fn new() -> Self {
-        RuntimePool {
+    pub fn new_shared() -> SharedRuntimes {
+        SharedRuntimes::new(RuntimePool {
             runtimes: HashMap::new(),
             next_id: 0,
-        }
+        })
     }
 
     pub fn create_runtime(
@@ -91,11 +96,5 @@ impl RuntimePool {
             RuntimePoolError::FailToBorrowMut(runtime_id, borrow_mut_error)
         })?;
         Ok(borrowed_runtime)
-    }
-}
-
-impl Default for RuntimePool {
-    fn default() -> Self {
-        RuntimePool::new()
     }
 }
