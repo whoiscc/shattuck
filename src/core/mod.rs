@@ -3,4 +3,4 @@
 pub mod memory;
 pub mod object;
 pub mod runtime;
-pub mod runtime_pool;
+pub mod shared_runtime;

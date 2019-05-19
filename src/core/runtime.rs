@@ -7,6 +7,7 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 
 use crate::core::memory::{Addr, Memory, MemoryError};
 use crate::core::object::Object;
+use crate::core::shared_runtime::SharedRuntime;
 
 pub struct Runtime {
     mem: Memory,
@@ -278,16 +279,18 @@ impl Runtime {
     }
 
     // <method>(&{args})
-    pub fn run_method(&mut self, method: Pointer) -> Result<(), RuntimeError> {
-        let method_object = self
+    pub fn run_method(shared: &SharedRuntime, method: Pointer) -> Result<(), RuntimeError> {
+        shared.write().push_frame()?;
+
+        let method_object = shared
+            .read()
             .mem
             .get_object(method.addr())?
             .as_method()
             .ok_or_else(|| RuntimeError::NotCallable(method))?;
+        method_object.run(shared)?;
 
-        self.push_frame()?;
-        method_object.run(self)?;
-        self.pop_frame()?;
+        shared.write().pop_frame()?;
         Ok(())
     }
 }

@@ -1,8 +1,8 @@
 //
 
 extern crate shattuck;
-use shattuck::core::runtime::{Runtime, RuntimeError};
-use shattuck::core::runtime_pool::{RuntimePool};
+use shattuck::core::runtime::RuntimeError;
+use shattuck::core::shared_runtime::{with, SharedRuntime};
 use shattuck::objects::int::IntObject;
 use shattuck::objects::method::MethodObject;
 
@@ -10,26 +10,26 @@ use shattuck::objects::method::MethodObject;
 struct DummyMethod;
 
 impl MethodObject for DummyMethod {
-    fn run(&self, interp: &mut Runtime) -> Result<(), RuntimeError> {
+    fn run(&self, runtime: &SharedRuntime) -> Result<(), RuntimeError> {
         println!("I am running!");
-        let context: &IntObject = interp.get_object(interp.context())?;
+        let with_runtime = with(runtime);
+        let context: &IntObject = with_runtime.get_object(with_runtime.context())?;
         println!("{:?}", context);
         Ok(())
     }
 }
 
 fn main() {
-    let pool = RuntimePool::new_shared();
-    let runtime_id = pool.write().unwrap().create_runtime(128).unwrap();
-    let borrowed_pool = pool.read().unwrap();
-    let mut borrowed_runtime = borrowed_pool.borrow_mut(runtime_id).unwrap();
-    let t0 = borrowed_runtime
+    let runtime = SharedRuntime::new(128).unwrap();
+    let t0 = runtime
+        .write()
         .append_object(Box::new(IntObject(42)))
         .unwrap();
-    let t1 = borrowed_runtime
+    let t1 = runtime
+        .write()
         .append_object(Box::new(DummyMethod))
         .unwrap();
-    borrowed_runtime.set_context(t0);
-    borrowed_runtime.run_method(t1).unwrap();
-    borrowed_runtime.garbage_collect();
+    runtime.write().set_context(t0);
+    runtime.run(t1).unwrap();
+    runtime.write().garbage_collect();
 }

@@ -1,10 +1,11 @@
 //
 
 use crate::core::object::Object;
-use crate::core::runtime::{Runtime, RuntimeError};
+use crate::core::runtime::RuntimeError;
+use crate::core::shared_runtime::SharedRuntime;
 
 pub trait MethodObject: Object {
-    fn run(&self, runtime: &mut Runtime) -> Result<(), RuntimeError>;
+    fn run(&self, runtime: &SharedRuntime) -> Result<(), RuntimeError>;
 }
 
 impl<T: 'static + MethodObject + Clone> Object for T {
