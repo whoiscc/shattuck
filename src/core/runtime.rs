@@ -7,8 +7,6 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 
 use crate::core::memory::{Addr, Memory, MemoryError};
 use crate::core::object::Object;
-use crate::core::shared_runtime::{SharedRuntime, SharedRuntimeError};
-use crate::objects::method::MethodObject;
 
 pub struct Runtime {
     mem: Memory,
@@ -27,7 +25,6 @@ pub enum RuntimeError {
     NotCallable(Pointer),
     Unhandled(Pointer),
     NoSuchProp(Pointer, String),
-    WouldBlock,
 }
 
 impl From<MemoryError> for RuntimeError {
@@ -35,14 +32,6 @@ impl From<MemoryError> for RuntimeError {
         match mem_err {
             MemoryError::Full => RuntimeError::OutOfMemory,
             MemoryError::InvalidAddr(addr) => RuntimeError::MissingObject(Pointer::with_addr(addr)),
-        }
-    }
-}
-
-impl From<SharedRuntimeError> for RuntimeError {
-    fn from(err: SharedRuntimeError) -> Self {
-        match err {
-            SharedRuntimeError::WouldBlock => RuntimeError::WouldBlock,
         }
     }
 }
@@ -67,7 +56,6 @@ impl Display for RuntimeError {
             RuntimeError::NoSuchProp(pointer, prop_key) => {
                 write!(f, "object '{:?}' don't have property {}", pointer, prop_key)
             }
-            RuntimeError::WouldBlock => write!(f, "borrow shared runtime would block"),
         }
     }
 }
@@ -179,7 +167,7 @@ impl Pointer {
 }
 
 impl Runtime {
-    pub(crate) fn new(max_object_count: usize) -> Result<Self, RuntimeError> {
+    pub fn new(max_object_count: usize) -> Result<Self, RuntimeError> {
         let mut mem = Memory::with_max_object_count(max_object_count);
         let first_frame = Frame::new(&mut mem, None)?;
         Ok(Runtime {
@@ -290,23 +278,17 @@ impl Runtime {
     }
 
     // <method>(&{args})
-    pub fn run_method(shared: &SharedRuntime, method: Pointer) -> Result<(), RuntimeError> {
-        shared.write()?.push_frame()?;
+    pub fn run_method(&mut self, method: Pointer) -> Result<(), RuntimeError> {
+        self.push_frame()?;
 
-        let mut method_object: Option<Box<dyn MethodObject>>;
-        {
-            let with_runtime = shared.read()?;
-            method_object = Some(
-                with_runtime
-                    .mem
-                    .get_object(method.addr())?
-                    .as_method()
-                    .ok_or_else(|| RuntimeError::NotCallable(method))?,
-            );
-        }
-        method_object.unwrap().run(shared)?;
+        let method_object = self
+            .mem
+            .get_object(method.addr())?
+            .as_method()
+            .ok_or_else(|| RuntimeError::NotCallable(method))?;
+        method_object.run(self)?;
 
-        shared.write()?.pop_frame()?;
+        self.pop_frame()?;
         Ok(())
     }
 }
