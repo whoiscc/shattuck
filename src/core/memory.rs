@@ -40,7 +40,7 @@ impl Display for MemoryError {
 impl Error for MemoryError {}
 
 impl Memory {
-    pub fn with_max_object_count(count: usize) -> Self {
+    pub fn new(count: usize) -> Self {
         Memory {
             max_object_count: count,
             objects: HashMap::new(),
@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn store_object_in_memory_and_get_it() {
-        let mut mem = Memory::with_max_object_count(16);
+        let mut mem = Memory::new(16);
         let obj = Box::new(DummyObject);
         let addr = mem.append_object(obj);
         assert!(addr.is_ok());
@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn store_fail_when_no_space() {
-        let mut mem = Memory::with_max_object_count(1);
+        let mut mem = Memory::new(1);
         let addr = mem.append_object(Box::new(DummyObject));
         mem.set_root(addr.unwrap()).unwrap();
         assert!(mem.append_object(Box::new(DummyObject)).is_err());
@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn collect_orphan_objects() {
-        let mut mem = Memory::with_max_object_count(2);
+        let mut mem = Memory::new(2);
         let root = mem.append_object(Box::new(DummyObject));
         mem.set_root(root.unwrap()).unwrap();
         let orphan = mem.append_object(Box::new(DummyObject)).unwrap();
@@ -209,7 +209,7 @@ mod tests {
 
     #[test]
     fn not_collect_held_objects() {
-        let mut mem = Memory::with_max_object_count(2);
+        let mut mem = Memory::new(2);
         let root = mem.append_object(Box::new(DummyObject)).unwrap();
         mem.set_root(root).unwrap();
         let holdee = mem.append_object(Box::new(DummyObject)).unwrap();
@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn same_in_same_out() {
-        let mut mem = Memory::with_max_object_count(2);
+        let mut mem = Memory::new(2);
         let int_obj1 = mem.append_object(Box::new(IntObject(42))).unwrap();
         assert_same_int(&mem, int_obj1, 42);
         let int_obj2 = mem.append_object(Box::new(IntObject(43))).unwrap();
@@ -247,7 +247,7 @@ mod tests {
         let mut rng = rand::thread_rng();
 
         for _ in 0..10 {
-            let mut mem = Memory::with_max_object_count(1024);
+            let mut mem = Memory::new(1024);
             let mut addr_vec = Vec::<Addr>::new();
             let mut alive_set = HashSet::<Addr>::new();
             let mut obj_count = 0;

@@ -168,7 +168,7 @@ impl Pointer {
 
 impl Runtime {
     pub fn new(max_object_count: usize) -> Result<Self, RuntimeError> {
-        let mut mem = Memory::with_max_object_count(max_object_count);
+        let mut mem = Memory::new(max_object_count);
         let first_frame = Frame::new(&mut mem, None)?;
         Ok(Runtime {
             mem,
