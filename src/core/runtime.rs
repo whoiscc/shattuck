@@ -1,13 +1,20 @@
 //
 
+use std::any::Any;
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::sync::Arc;
 
-use crate::core::memory::{Addr, Memory, MemoryError};
+extern crate crossbeam;
+use crossbeam::sync::{ShardedLock, ShardedLockReadGuard as ReadLock};
+
+use crate::core::memory::{Addr, Memory as RawMemory, MemoryError};
 use crate::core::object::{AsMethod, CloneObject, Object};
 use crate::objects::prop::PropObject;
+
+type Memory = Arc<ShardedLock<RawMemory>>;
 
 pub struct Runtime {
     mem: Memory,
@@ -104,47 +111,55 @@ impl AsMethod for Env {}
 impl CloneObject for Env {}
 
 impl Frame {
-    fn new(mem: &mut Memory, parent: Option<Addr>) -> Result<Self, RuntimeError> {
-        let first_env = mem.append_object(Box::new(Env::new()))?;
+    fn new(mem: Memory, parent: Option<Addr>) -> Result<Self, RuntimeError> {
+        let first_env = mem.write().unwrap().append_object(Box::new(Env::new()))?;
         let frame = Frame {
             env_stack: vec![first_env],
         };
         if let Some(parent_addr) = parent {
-            mem.hold(first_env, parent_addr)
+            mem.write()
+                .unwrap()
+                .hold(first_env, parent_addr)
                 .expect("first_env -> parent_addr");
         }
-        mem.set_root(first_env).expect("root <- first_env");
+        mem.write()
+            .unwrap()
+            .set_root(first_env)
+            .expect("root <- first_env");
         Ok(frame)
     }
 
-    fn push_env(&mut self, mem: &mut Memory) -> Result<(), RuntimeError> {
-        let env = mem.append_object(Box::new(Env::new()))?;
-        mem.hold(env, *self.env_stack.last().expect("env_stack.last()"))
+    fn push_env(&mut self, mem: Memory) -> Result<(), RuntimeError> {
+        let env = mem.write().unwrap().append_object(Box::new(Env::new()))?;
+        mem.write()
+            .unwrap()
+            .hold(env, *self.env_stack.last().expect("env_stack.last()"))
             .expect("env -> prev env");
-        mem.set_root(env).expect("root <- env");
+        mem.write().unwrap().set_root(env).expect("root <- env");
         self.env_stack.push(env);
         Ok(())
     }
 
-    fn pop_env(&mut self, mem: &mut Memory) -> Result<(), RuntimeError> {
+    fn pop_env(&mut self, mem: Memory) -> Result<(), RuntimeError> {
         self.env_stack.pop();
-        mem.set_root(*self.env_stack.last().ok_or(RuntimeError::EmptyEnvStack)?)
+        mem.write()
+            .unwrap()
+            .set_root(*self.env_stack.last().ok_or(RuntimeError::EmptyEnvStack)?)
             .expect("root <- prev env");
         Ok(())
     }
 
-    fn insert_object(
-        &self,
-        mem: &mut Memory,
-        pointer: &str,
-        object: Addr,
-    ) -> Result<(), MemoryError> {
-        mem.set_object_property(self.current_env(), pointer, object)
+    fn insert_object(&self, mem: Memory, pointer: &str, object: Addr) -> Result<(), MemoryError> {
+        mem.write()
+            .unwrap()
+            .set_object_property(self.current_env(), pointer, object)
     }
 
-    fn find_object(&self, mem: &Memory, pointer: &str) -> Result<Addr, RuntimeError> {
+    fn find_object(&self, mem: Memory, pointer: &str) -> Result<Addr, RuntimeError> {
         for env in self.env_stack.iter().rev() {
             if let Some(object) = mem
+                .read()
+                .unwrap()
                 .get_object(*env)
                 .expect("env in env_stack")
                 .as_prop()
@@ -162,10 +177,26 @@ impl Frame {
     }
 }
 
+pub struct GetObject<'a>(ReadLock<'a, RawMemory>, Addr);
+
+impl<'a> GetObject<'a> {
+    pub fn to<T: Any>(&self) -> Result<&T, RuntimeError> {
+        let GetObject(mem, addr) = self;
+        let obj = mem.get_object(*addr)?.as_any();
+        obj.downcast_ref::<T>().ok_or(RuntimeError::TypeMismatch {
+            expected: TypeId::of::<T>(),
+            actual: obj.type_id(),
+        })
+    }
+}
+
+pub fn make_shared(raw_mem: RawMemory) -> Memory {
+    Arc::new(ShardedLock::new(raw_mem))
+}
+
 impl Runtime {
-    pub fn new(max_object_count: usize) -> Result<Self, RuntimeError> {
-        let mut mem = Memory::new(max_object_count);
-        let first_frame = Frame::new(&mut mem, None)?;
+    pub fn new(mem: Memory) -> Result<Self, RuntimeError> {
+        let first_frame = Frame::new(Arc::clone(&mem), None)?;
         Ok(Runtime {
             mem,
             context_object: first_frame.current_env(),
@@ -175,7 +206,7 @@ impl Runtime {
 
     pub fn push_frame(&mut self) -> Result<(), RuntimeError> {
         let frame = Frame::new(
-            &mut self.mem,
+            Arc::clone(&self.mem),
             self.frame_stack.last().map(Frame::current_env),
         )?;
         self.frame_stack.push(frame);
@@ -192,45 +223,49 @@ impl Runtime {
             .current_env();
         // if holder_env keeps alive because returned closure, it should not cause holdee_env
         // to be alive because holdee_env is invisible to the closure
-        self.mem.drop(holder_env, holdee_env)?;
-        self.mem.set_root(holdee_env).expect("root <- current env");
+        RawMemory::drop(&mut self.mem.write().unwrap(), holder_env, holdee_env)?;
+        self.mem
+            .write()
+            .unwrap()
+            .set_root(holdee_env)
+            .expect("root <- current env");
         Ok(())
     }
 
     pub fn push_env(&mut self) -> Result<(), RuntimeError> {
         let frame = self.frame_stack.last_mut().expect("current frame");
-        frame.push_env(&mut self.mem)
+        frame.push_env(Arc::clone(&self.mem))
     }
 
     pub fn pop_env(&mut self) -> Result<(), RuntimeError> {
         self.frame_stack
             .last_mut()
             .expect("current frame")
-            .pop_env(&mut self.mem)
+            .pop_env(Arc::clone(&self.mem))
     }
 
-    pub fn get_object<T: 'static>(&self, addr: Addr) -> Result<&T, RuntimeError> {
-        let obj = self.mem.get_object(addr)?.as_any();
-        obj.downcast_ref::<T>().ok_or(RuntimeError::TypeMismatch {
-            expected: TypeId::of::<T>(),
-            actual: obj.type_id(),
-        })
+    pub fn get_object(&self, addr: Addr) -> GetObject {
+        GetObject(self.mem.read().unwrap(), addr)
     }
 
     pub fn garbage_collect(&mut self) {
-        self.mem.collect();
+        self.mem.write().unwrap().collect();
     }
 
     // <pointer> = <object>
     pub fn append_object(&mut self, object: Box<dyn Object>) -> Result<Addr, RuntimeError> {
-        self.mem.append_object(object).map_err(Into::into)
+        self.mem
+            .write()
+            .unwrap()
+            .append_object(object)
+            .map_err(Into::into)
     }
 
     // env_name = <pointer>
     pub fn insert_name(&mut self, name: &str, addr: Addr) -> Result<(), RuntimeError> {
         let frame = self.frame_stack.last().expect("current frame");
         frame
-            .insert_object(&mut self.mem, name, addr)
+            .insert_object(Arc::clone(&self.mem), name, addr)
             .map_err(Into::into)
     }
 
@@ -239,13 +274,15 @@ impl Runtime {
         self.frame_stack
             .last()
             .expect("current frame")
-            .find_object(&self.mem, env_name)
+            .find_object(Arc::clone(&self.mem), env_name)
     }
 
     // <pointer> = object.prop
     pub fn get_property(&self, object: Addr, prop: &str) -> Result<Addr, RuntimeError> {
         Ok(self
             .mem
+            .read()
+            .unwrap()
             .get_object(object)?
             .as_prop()
             .unwrap() // TODO
@@ -261,6 +298,8 @@ impl Runtime {
         addr: Addr,
     ) -> Result<(), RuntimeError> {
         self.mem
+            .write()
+            .unwrap()
             .set_object_property(object, prop, addr)
             .map_err(Into::into)
     }
@@ -279,7 +318,13 @@ impl Runtime {
     pub fn run_method(&mut self, method: Addr) -> Result<(), RuntimeError> {
         self.push_frame()?;
 
-        let cloned_method = self.mem.get_object(method)?.clone_object().unwrap(); // TODO
+        let cloned_method = self
+            .mem
+            .read()
+            .unwrap()
+            .get_object(method)?
+            .clone_object()
+            .unwrap(); // TODO
         let method_object = cloned_method
             .as_method()
             .ok_or_else(|| RuntimeError::NotCallable(method))?;

@@ -1,8 +1,9 @@
 //
 
 extern crate shattuck;
+use shattuck::core::memory::Memory;
 use shattuck::core::object::{AsProp, Object};
-use shattuck::core::runtime::{Runtime, RuntimeError};
+use shattuck::core::runtime::{make_shared, Runtime, RuntimeError};
 use shattuck::objects::int::IntObject;
 use shattuck::objects::method::MethodObject;
 
@@ -18,8 +19,10 @@ impl MethodObject for DummyMethod {
         // test borrow mut
         runtime.push_env()?;
 
-        let context: &IntObject = runtime.get_object(runtime.context())?;
-        println!("{:?}", context);
+        println!(
+            "{:?}",
+            runtime.get_object(runtime.context()).to::<IntObject>()?
+        );
 
         runtime.pop_env()?;
 
@@ -30,7 +33,8 @@ impl MethodObject for DummyMethod {
 impl Object for DummyMethod {}
 
 fn main() {
-    let mut runtime = Runtime::new(128).unwrap();
+    let mem = make_shared(Memory::new(128));
+    let mut runtime = Runtime::new(mem).unwrap();
     let t0 = runtime.append_object(Box::new(IntObject(42))).unwrap();
     let t1 = runtime.append_object(Box::new(DummyMethod)).unwrap();
     runtime.set_context(t0);
