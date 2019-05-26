@@ -2,12 +2,13 @@
 
 use std::collections::HashMap;
 
-use crate::core::object::Object;
-use crate::core::runtime::Pointer;
+use crate::core::memory::Addr;
+use crate::core::object::{AsMethod, CloneObject, Object};
+use crate::objects::prop::PropObject;
 
 #[derive(Debug)]
 pub struct DerivedObject {
-    props: HashMap<String, Pointer>,
+    props: HashMap<String, Addr>,
 }
 
 impl DerivedObject {
@@ -17,12 +18,11 @@ impl DerivedObject {
         }
     }
 
-    pub fn get_property(&self, key: &str) -> Option<Pointer> {
+    pub fn get_property(&self, key: &str) -> Option<Addr> {
         self.props.get(key).cloned()
     }
 
-    pub fn set_property(&mut self, key: &str, new_prop: Pointer) {
-        // TODO: old prop checking
+    pub fn set_property(&mut self, key: &str, new_prop: Addr) {
         self.props.insert(key.to_string(), new_prop);
     }
 }
@@ -33,12 +33,18 @@ impl Default for DerivedObject {
     }
 }
 
-impl Object for DerivedObject {
-    fn get_property(&self, key: &str) -> Option<Pointer> {
+impl PropObject for DerivedObject {
+    fn get_prop(&self, key: &str) -> Option<Addr> {
         self.get_property(key)
     }
 
-    fn set_property(&mut self, key: &str, new_prop: Pointer) {
-        self.set_property(key, new_prop)
+    fn set_prop(&mut self, key: &str, prop: Addr) {
+        self.set_property(key, prop)
     }
 }
+
+impl AsMethod for DerivedObject {}
+
+impl Object for DerivedObject {}
+
+impl CloneObject for DerivedObject {}

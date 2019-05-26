@@ -2,22 +2,11 @@
 
 use std::any::Any;
 
-use crate::core::runtime::Pointer;
 use crate::objects::method::MethodObject;
+use crate::objects::prop::PropObject;
 
-pub trait Object: Any + AsAny {
-    fn get_property(&self, _key: &str) -> Option<Pointer> {
-        None
-    }
-
-    fn set_property(&mut self, _key: &str, _new_prop: Pointer) {
-        //
-    }
-
-    // downcast
-    fn as_method(&self) -> Option<Box<dyn MethodObject>> {
-        None
-    }
+pub trait Object: Any + AsAny + AsMethod + AsProp + CloneObject {
+    //
 }
 
 pub trait AsAny {
@@ -27,5 +16,36 @@ pub trait AsAny {
 impl<T: Object> AsAny for T {
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+pub trait AsMethod {
+    fn as_method(&self) -> Option<&dyn MethodObject> {
+        None
+    }
+}
+
+pub trait AsProp {
+    fn as_prop(&self) -> Option<&dyn PropObject> {
+        None
+    }
+
+    fn as_prop_mut(&mut self) -> Option<&mut dyn PropObject> {
+        None
+    }
+}
+
+pub trait CloneObject {
+    fn clone_object(&self) -> Option<Box<dyn Object>> {
+        None
+    }
+}
+
+impl<O> CloneObject for O
+where
+    O: Object + Clone,
+{
+    fn clone_object(&self) -> Option<Box<dyn Object>> {
+        Some(Box::new(self.clone()))
     }
 }

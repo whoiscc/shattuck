@@ -1,12 +1,15 @@
 //
 
 extern crate shattuck;
+use shattuck::core::object::{AsProp, Object};
 use shattuck::core::runtime::{Runtime, RuntimeError};
 use shattuck::objects::int::IntObject;
 use shattuck::objects::method::MethodObject;
 
 #[derive(Clone)]
 struct DummyMethod;
+
+impl AsProp for DummyMethod {}
 
 impl MethodObject for DummyMethod {
     fn run(&self, runtime: &mut Runtime) -> Result<(), RuntimeError> {
@@ -23,6 +26,8 @@ impl MethodObject for DummyMethod {
         Ok(())
     }
 }
+
+impl Object for DummyMethod {}
 
 fn main() {
     let mut runtime = Runtime::new(128).unwrap();

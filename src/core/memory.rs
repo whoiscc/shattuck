@@ -5,7 +5,6 @@ use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
 use crate::core::object::Object;
-use crate::core::runtime::Pointer;
 
 #[derive(Clone, Copy, Hash, Debug, PartialEq, Eq)]
 pub struct Addr(usize);
@@ -150,12 +149,12 @@ impl Memory {
         key: &str,
         new_prop: Addr,
     ) -> Result<(), MemoryError> {
-        let object = self.get_object(addr)?;
-        if let Some(old_prop) = object.get_property(key) {
-            self.drop(addr, old_prop.addr())?;
+        let object = self.get_object(addr)?.as_prop().unwrap();
+        if let Some(old_prop) = object.get_prop(key) {
+            self.drop(addr, old_prop)?;
         }
-        let object_mut = self.get_object_mut(addr)?;
-        object_mut.set_property(key, Pointer::with_addr(new_prop));
+        let object_mut = self.get_object_mut(addr)?.as_prop_mut().unwrap();
+        object_mut.set_prop(key, new_prop);
         self.hold(addr, new_prop)?;
         Ok(())
     }
@@ -164,18 +163,13 @@ impl Memory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::object::{AsMethod, AsProp};
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     struct DummyObject;
-    impl Object for DummyObject {
-        fn get_property(&self, _key: &str) -> Option<Pointer> {
-            panic!()
-        }
-
-        fn set_property(&mut self, _key: &str, _new_prop: Pointer) {
-            panic!()
-        }
-    }
+    impl AsMethod for DummyObject {}
+    impl AsProp for DummyObject {}
+    impl Object for DummyObject {}
 
     #[test]
     fn store_object_in_memory_and_get_it() {
