@@ -21,7 +21,9 @@ impl MethodObject for DummyMethod {
 
         println!(
             "{:?}",
-            runtime.get_object(runtime.context()).to::<IntObject>()?
+            runtime
+                .get_object(runtime.index_arg(0)?)
+                .to::<IntObject>()?
         );
 
         runtime.pop_env()?;
@@ -37,7 +39,7 @@ fn main() {
     let mut runtime = Runtime::new(mem).unwrap();
     let t0 = runtime.append_object(Box::new(IntObject(42))).unwrap();
     let t1 = runtime.append_object(Box::new(DummyMethod)).unwrap();
-    runtime.set_context(t0);
+    runtime.set_arg(vec![t0]).unwrap();
     runtime.run_method(t1).unwrap();
     runtime.garbage_collect();
 }

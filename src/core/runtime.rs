@@ -11,7 +11,7 @@ extern crate crossbeam;
 use crossbeam::sync::{ShardedLock, ShardedLockReadGuard as ReadLock};
 
 use crate::core::memory::{Addr, Memory as RawMemory, MemoryError};
-use crate::core::object::{AsMethod, CloneObject, Object};
+use crate::core::object::{AsMethod, AsProp, CloneObject, Object};
 use crate::objects::prop::PropObject;
 
 type Memory = Arc<ShardedLock<RawMemory>>;
@@ -20,6 +20,27 @@ pub struct Runtime {
     mem: Memory,
     frame_stack: Vec<Frame>,
     context_object: Addr,
+    arg_object: Addr,
+}
+
+#[derive(Clone)]
+pub struct Arg(Vec<Addr>);
+
+impl Object for Arg {}
+impl AsProp for Arg {}
+impl AsMethod for Arg {}
+
+impl Arg {
+    fn insert(addr_vec: Vec<Addr>, mem: Memory) -> Result<Addr, RuntimeError> {
+        let arg = mem
+            .write()
+            .unwrap()
+            .append_object(Box::new(Arg(addr_vec.clone())))?;
+        for addr in addr_vec {
+            mem.write().unwrap().hold(arg, addr)?;
+        }
+        Ok(arg)
+    }
 }
 
 #[derive(Debug)]
@@ -197,19 +218,55 @@ pub fn make_shared(raw_mem: RawMemory) -> Memory {
 impl Runtime {
     pub fn new(mem: Memory) -> Result<Self, RuntimeError> {
         let first_frame = Frame::new(Arc::clone(&mem), None)?;
-        Ok(Runtime {
-            mem,
+        let arg_object = Arg::insert(Vec::new(), Arc::clone(&mem))?;
+        let runtime = Runtime {
+            mem: Arc::clone(&mem),
             context_object: first_frame.current_env(),
             frame_stack: vec![first_frame],
-        })
+            arg_object,
+        };
+        runtime.hold_arg()?;
+        Ok(runtime)
+    }
+
+    pub fn set_arg(&mut self, args: Vec<Addr>) -> Result<(), RuntimeError> {
+        self.drop_arg()?;
+        self.arg_object = Arg::insert(args, Arc::clone(&self.mem))?;
+        self.hold_arg()?;
+        Ok(())
+    }
+
+    pub fn index_arg(&self, index: usize) -> Result<Addr, RuntimeError> {
+        let get_args = self.get_object(self.arg_object);
+        let Arg(args) = get_args.to()?;
+        Ok(*args.get(index).unwrap()) // TODO
+    }
+
+    fn drop_arg(&self) -> Result<(), RuntimeError> {
+        RawMemory::drop(
+            &mut self.mem.write().unwrap(),
+            self.current_frame().current_env(),
+            self.arg_object,
+        )
+        .map_err(Into::into)
+    }
+
+    fn hold_arg(&self) -> Result<(), RuntimeError> {
+        self.mem
+            .write()
+            .unwrap()
+            .hold(self.current_frame().current_env(), self.arg_object)
+            .map_err(Into::into)
     }
 
     pub fn push_frame(&mut self) -> Result<(), RuntimeError> {
-        let frame = Frame::new(
-            Arc::clone(&self.mem),
-            self.frame_stack.last().map(Frame::current_env),
-        )?;
+        let prev_env = self.current_frame().current_env();
+        let frame = Frame::new(Arc::clone(&self.mem), Some(prev_env))?;
         self.frame_stack.push(frame);
+
+        self.hold_arg()?;
+        RawMemory::drop(&mut self.mem.write().unwrap(), prev_env, self.arg_object)?;
+
         Ok(())
     }
 
@@ -221,6 +278,13 @@ impl Runtime {
             .last()
             .ok_or(RuntimeError::EmptyFrameStack)?
             .current_env();
+
+        self.mem
+            .write()
+            .unwrap()
+            .hold(holdee_env, self.arg_object)?;
+        RawMemory::drop(&mut self.mem.write().unwrap(), holder_env, self.arg_object)?;
+
         // if holder_env keeps alive because returned closure, it should not cause holdee_env
         // to be alive because holdee_env is invisible to the closure
         RawMemory::drop(&mut self.mem.write().unwrap(), holder_env, holdee_env)?;
@@ -233,15 +297,13 @@ impl Runtime {
     }
 
     pub fn push_env(&mut self) -> Result<(), RuntimeError> {
-        let frame = self.frame_stack.last_mut().expect("current frame");
-        frame.push_env(Arc::clone(&self.mem))
+        let mem = Arc::clone(&self.mem);
+        self.current_frame_mut().push_env(mem)
     }
 
     pub fn pop_env(&mut self) -> Result<(), RuntimeError> {
-        self.frame_stack
-            .last_mut()
-            .expect("current frame")
-            .pop_env(Arc::clone(&self.mem))
+        let mem = Arc::clone(&self.mem);
+        self.current_frame_mut().pop_env(mem)
     }
 
     pub fn get_object(&self, addr: Addr) -> GetObject {
@@ -263,18 +325,23 @@ impl Runtime {
 
     // env_name = <pointer>
     pub fn insert_name(&mut self, name: &str, addr: Addr) -> Result<(), RuntimeError> {
-        let frame = self.frame_stack.last().expect("current frame");
-        frame
+        self.current_frame()
             .insert_object(Arc::clone(&self.mem), name, addr)
             .map_err(Into::into)
     }
 
     // <pointer> = env_name
     pub fn find_name(&self, env_name: &str) -> Result<Addr, RuntimeError> {
-        self.frame_stack
-            .last()
-            .expect("current frame")
+        self.current_frame()
             .find_object(Arc::clone(&self.mem), env_name)
+    }
+
+    fn current_frame(&self) -> &Frame {
+        self.frame_stack.last().expect("current frame")
+    }
+
+    fn current_frame_mut(&mut self) -> &mut Frame {
+        self.frame_stack.last_mut().expect("current frame")
     }
 
     // <pointer> = object.prop
