@@ -77,6 +77,12 @@ impl Memory {
             .ok_or_else(|| MemoryError::InvalidAddr(addr))
     }
 
+    pub fn replace_object(&mut self, dest: Addr, src: Box<dyn Object>) -> Box<dyn Object> {
+        let replaced = self.objects.remove(&dest).unwrap();
+        self.objects.insert(dest, src);
+        replaced
+    }
+
     pub fn set_root(&mut self, addr: Addr) -> Result<(), MemoryError> {
         self.get_object(addr)?;
         self.root_addr = Some(addr);

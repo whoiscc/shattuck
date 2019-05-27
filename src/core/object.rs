@@ -5,7 +5,7 @@ use std::any::Any;
 use crate::objects::method::MethodObject;
 use crate::objects::prop::PropObject;
 
-pub trait Object: Any + AsAny + AsMethod + AsProp + CloneObject {
+pub trait Object: Any + Send + Sync + AsAny + AsMethod + AsProp + CloneObject {
     //
 }
 

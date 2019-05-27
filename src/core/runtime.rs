@@ -14,7 +14,7 @@ use crate::core::memory::{Addr, Memory as RawMemory, MemoryError};
 use crate::core::object::{AsMethod, AsProp, CloneObject, Object};
 use crate::objects::prop::PropObject;
 
-type Memory = Arc<ShardedLock<RawMemory>>;
+pub type Memory = Arc<ShardedLock<RawMemory>>;
 
 pub struct Runtime {
     mem: Memory,
@@ -31,7 +31,7 @@ impl AsProp for Arg {}
 impl AsMethod for Arg {}
 
 impl Arg {
-    fn insert(addr_vec: Vec<Addr>, mem: Memory) -> Result<Addr, RuntimeError> {
+    pub fn insert(addr_vec: Vec<Addr>, mem: Memory) -> Result<Addr, RuntimeError> {
         let arg = mem
             .write()
             .unwrap()
@@ -229,9 +229,17 @@ impl Runtime {
         Ok(runtime)
     }
 
-    pub fn set_arg(&mut self, args: Vec<Addr>) -> Result<(), RuntimeError> {
+    pub fn memory(&self) -> Memory {
+        Arc::clone(&self.mem)
+    }
+
+    pub fn arg(&self) -> Addr {
+        self.arg_object
+    }
+
+    pub fn set_arg(&mut self, args: Addr) -> Result<(), RuntimeError> {
         self.drop_arg()?;
-        self.arg_object = Arg::insert(args, Arc::clone(&self.mem))?;
+        self.arg_object = args;
         self.hold_arg()?;
         Ok(())
     }
@@ -279,11 +287,7 @@ impl Runtime {
             .ok_or(RuntimeError::EmptyFrameStack)?
             .current_env();
 
-        self.mem
-            .write()
-            .unwrap()
-            .hold(holdee_env, self.arg_object)?;
-        RawMemory::drop(&mut self.mem.write().unwrap(), holder_env, self.arg_object)?;
+        self.hold_arg()?;
 
         // if holder_env keeps alive because returned closure, it should not cause holdee_env
         // to be alive because holdee_env is invisible to the closure
@@ -308,6 +312,10 @@ impl Runtime {
 
     pub fn get_object(&self, addr: Addr) -> GetObject {
         GetObject(self.mem.read().unwrap(), addr)
+    }
+
+    pub fn replace_object(&self, dest: Addr, src: Box<dyn Object>) -> Box<dyn Object> {
+        self.mem.write().unwrap().replace_object(dest, src)
     }
 
     pub fn garbage_collect(&mut self) {
