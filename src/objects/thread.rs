@@ -1,7 +1,7 @@
 //
 
 use crate::core::memory::Addr;
-use crate::core::object::{AsProp, AsMethod, Object, CloneObject};
+use crate::core::object::{AsMethod, AsProp, CloneObject, Object};
 use crate::core::runtime::{Arg, Memory, Runtime, RuntimeError};
 use crate::objects::method::MethodObject;
 

@@ -4,15 +4,13 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::error::Error;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
-use crate::core::object::Object;
-
 #[derive(Clone, Copy, Hash, Debug, PartialEq, Eq)]
 pub struct Addr(usize);
 
-pub struct Memory {
+pub struct Memory<O> {
     max_object_count: usize,
     // the space actually saved (the pointers of) the objects
-    objects: HashMap<Addr, Box<dyn Object>>,
+    objects: HashMap<Addr, O>,
     // counter for Addr and PrivAddr
     next_addr: usize,
     // root index in `to_space`
@@ -38,7 +36,7 @@ impl Display for MemoryError {
 
 impl Error for MemoryError {}
 
-impl Memory {
+impl<O> Memory<O> {
     pub fn new(count: usize) -> Self {
         Memory {
             max_object_count: count,
@@ -49,7 +47,7 @@ impl Memory {
         }
     }
 
-    pub fn append_object(&mut self, object: Box<dyn Object>) -> Result<Addr, MemoryError> {
+    pub fn append_object(&mut self, object: O) -> Result<Addr, MemoryError> {
         if self.objects.len() == self.max_object_count {
             self.collect();
         }
@@ -63,24 +61,25 @@ impl Memory {
         Ok(addr)
     }
 
-    pub fn get_object(&self, addr: Addr) -> Result<&dyn Object, MemoryError> {
+    pub fn get_object(&self, addr: Addr) -> Result<&O, MemoryError> {
         self.objects
             .get(&addr)
-            .map(|boxed_obj| &**boxed_obj)
             .ok_or_else(|| MemoryError::InvalidAddr(addr))
     }
 
-    pub fn get_object_mut(&mut self, addr: Addr) -> Result<&mut dyn Object, MemoryError> {
+    pub fn get_object_mut(&mut self, addr: Addr) -> Result<&mut O, MemoryError> {
         self.objects
             .get_mut(&addr)
-            .map(|boxed_obj| &mut **boxed_obj)
             .ok_or_else(|| MemoryError::InvalidAddr(addr))
     }
 
-    pub fn replace_object(&mut self, dest: Addr, src: Box<dyn Object>) -> Box<dyn Object> {
-        let replaced = self.objects.remove(&dest).unwrap();
+    pub fn replace_object(&mut self, dest: Addr, src: O) -> Result<O, MemoryError> {
+        let replaced = self
+            .objects
+            .remove(&dest)
+            .ok_or_else(|| MemoryError::InvalidAddr(dest))?;
         self.objects.insert(dest, src);
-        replaced
+        Ok(replaced)
     }
 
     pub fn set_root(&mut self, addr: Addr) -> Result<(), MemoryError> {
@@ -98,11 +97,18 @@ impl Memory {
         Ok(())
     }
 
-    pub fn drop(&mut self, holder: Addr, holdee: Addr) -> Result<(), MemoryError> {
+    pub fn unhold(&mut self, holder: Addr, holdee: Addr) -> Result<(), MemoryError> {
+        self.get_object(holdee)?;
         self.ref_map
             .get_mut(&holder)
             .ok_or_else(|| MemoryError::InvalidAddr(holder))?
             .remove(&holdee);
+        Ok(())
+    }
+
+    pub fn replace_hold(&mut self, holder: Addr, old: Addr, new: Addr) -> Result<(), MemoryError> {
+        self.unhold(holder, old)?;
+        self.hold(holder, new)?;
         Ok(())
     }
 
@@ -148,146 +154,9 @@ impl Memory {
         self.next_addr += 1;
         addr
     }
-
-    pub fn set_object_property(
-        &mut self,
-        addr: Addr,
-        key: &str,
-        new_prop: Addr,
-    ) -> Result<(), MemoryError> {
-        let object = self.get_object(addr)?.as_prop().unwrap();
-        if let Some(old_prop) = object.get_prop(key) {
-            self.drop(addr, old_prop)?;
-        }
-        let object_mut = self.get_object_mut(addr)?.as_prop_mut().unwrap();
-        object_mut.set_prop(key, new_prop);
-        self.hold(addr, new_prop)?;
-        Ok(())
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::core::object::{AsMethod, AsProp};
-
-    #[derive(Debug, Clone)]
-    struct DummyObject;
-    impl AsMethod for DummyObject {}
-    impl AsProp for DummyObject {}
-    impl Object for DummyObject {}
-
-    #[test]
-    fn store_object_in_memory_and_get_it() {
-        let mut mem = Memory::new(16);
-        let obj = Box::new(DummyObject);
-        let addr = mem.append_object(obj);
-        assert!(addr.is_ok());
-        let returned_obj = mem.get_object(addr.unwrap());
-        assert!(returned_obj.is_ok());
-    }
-
-    #[test]
-    fn store_fail_when_no_space() {
-        let mut mem = Memory::new(1);
-        let addr = mem.append_object(Box::new(DummyObject));
-        mem.set_root(addr.unwrap()).unwrap();
-        assert!(mem.append_object(Box::new(DummyObject)).is_err());
-    }
-
-    #[test]
-    fn collect_orphan_objects() {
-        let mut mem = Memory::new(2);
-        let root = mem.append_object(Box::new(DummyObject));
-        mem.set_root(root.unwrap()).unwrap();
-        let orphan = mem.append_object(Box::new(DummyObject)).unwrap();
-        let third = mem.append_object(Box::new(DummyObject));
-        assert!(third.is_ok());
-        assert!(mem.get_object(orphan).is_err());
-        assert!(mem.get_object(third.unwrap()).is_ok());
-    }
-
-    #[test]
-    fn not_collect_held_objects() {
-        let mut mem = Memory::new(2);
-        let root = mem.append_object(Box::new(DummyObject)).unwrap();
-        mem.set_root(root).unwrap();
-        let holdee = mem.append_object(Box::new(DummyObject)).unwrap();
-        mem.hold(root, holdee).unwrap();
-        let third = mem.append_object(Box::new(DummyObject));
-        assert!(third.is_err());
-        assert!(mem.get_object(holdee).is_ok());
-    }
-
-    use crate::objects::int::IntObject;
-
-    #[test]
-    fn same_in_same_out() {
-        let mut mem = Memory::new(2);
-        let int_obj1 = mem.append_object(Box::new(IntObject(42))).unwrap();
-        assert_same_int(&mem, int_obj1, 42);
-        let int_obj2 = mem.append_object(Box::new(IntObject(43))).unwrap();
-        mem.set_root(int_obj2).unwrap();
-        let int_obj3 = mem.append_object(Box::new(IntObject(44))).unwrap();
-        assert_same_int(&mem, int_obj2, 43);
-        assert_same_int(&mem, int_obj3, 44);
-    }
-
-    fn assert_same_int(mem: &Memory, addr: Addr, expect: i64) {
-        let returned_obj = mem.get_object(addr).unwrap();
-        assert!(returned_obj.as_any().is::<IntObject>());
-        let returned_int_obj = returned_obj.as_any().downcast_ref::<IntObject>().unwrap();
-        assert_eq!(*returned_int_obj, IntObject(expect));
-    }
-
-    #[test]
-    fn random_hold() {
-        extern crate rand;
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
-
-        for _ in 0..10 {
-            let mut mem = Memory::new(1024);
-            let mut addr_vec = Vec::<Addr>::new();
-            let mut alive_set = HashSet::<Addr>::new();
-            let mut obj_count = 0;
-            let root = mem.append_object(Box::new(IntObject(obj_count))).unwrap();
-            mem.set_root(root).unwrap();
-            obj_count += 1;
-            addr_vec.push(root);
-            alive_set.insert(root);
-            while obj_count < 1024 {
-                let obj = mem.append_object(Box::new(IntObject(obj_count))).unwrap();
-                obj_count += 1;
-                addr_vec.push(obj);
-                let mut chance = 0.8;
-                while rng.gen::<f64>() < chance {
-                    // minus 1 to prevent self-holding
-                    let holder = rng.gen_range(0, obj_count - 1) as usize;
-                    let holder_addr = addr_vec[holder];
-                    mem.hold(holder_addr, obj).unwrap();
-                    if alive_set.contains(&holder_addr) {
-                        alive_set.insert(obj);
-                    }
-                    chance -= 0.2;
-                }
-            }
-            let _ = mem.append_object(Box::new(DummyObject)).unwrap();
-            for addr in addr_vec {
-                if alive_set.contains(&addr) {
-                    assert!(mem.get_object(addr).is_ok());
-                } else {
-                    assert!(mem.get_object(addr).is_err());
-                }
-            }
-        }
-    }
-
-    #[test]
-    #[ignore]
-    fn random_hold_1000() {
-        for _ in 0..100 {
-            random_hold();
-        }
-    }
+    //
 }
