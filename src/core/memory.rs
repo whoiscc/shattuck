@@ -3,6 +3,7 @@
 use crate::core::inc::Inc;
 use crate::core::runtime_error::RuntimeError;
 
+use std::collections::hash_set::Iter;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 pub struct Memory<O> {
@@ -98,6 +99,10 @@ impl<O> Memory<O> {
         Ok(())
     }
 
+    pub fn iter_holdee(&self, object_id: usize) -> Iter<usize> {
+        self.ref_map[&object_id].iter()
+    }
+
     pub fn collect(&mut self) {
         use std::time::Instant;
         let now = Instant::now();
@@ -113,7 +118,7 @@ impl<O> Memory<O> {
             // remove it from dead set
             dead_set.remove(&object_addr);
             // queue its holdee
-            for holdee_addr in self.ref_map[&object_addr].iter() {
+            for holdee_addr in self.iter_holdee(object_addr) {
                 if dead_set.contains(holdee_addr) {
                     queue.push_back(holdee_addr.to_owned());
                 }

@@ -1,411 +1,194 @@
 //
 
-use std::any::Any;
-use std::any::TypeId;
-use std::collections::HashMap;
-use std::error::Error;
-use std::fmt::{Display, Formatter, Result as FmtResult};
-use std::sync::Arc;
+use std::collections::VecDeque;
+use std::ops::{Deref, DerefMut};
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-extern crate crossbeam;
-use crossbeam::sync::{ShardedLock, ShardedLockReadGuard as ReadLock};
+use crate::core::memory::Memory;
+use crate::core::runtime_error::RuntimeError;
 
-use crate::core::memory::{Addr, Memory as RawMemory, MemoryError};
-use crate::core::object::{AsMethod, AsProp, CloneObject, Object};
-use crate::objects::prop::PropObject;
-
-pub type Memory = Arc<ShardedLock<RawMemory>>;
-
-pub struct Runtime {
-    mem: Memory,
-    frame_stack: Vec<Frame>,
-    context_object: Addr,
-    arg_object: Addr,
+enum QuasiObject<O, S> {
+    Local(O),
+    Remote(Arc<RwLock<S>>),
+    Temp,
 }
 
-#[derive(Clone)]
-pub struct Arg(Vec<Addr>);
-
-impl Object for Arg {}
-impl AsProp for Arg {}
-impl AsMethod for Arg {}
-
-impl Arg {
-    pub fn insert(addr_vec: Vec<Addr>, mem: Memory) -> Result<Addr, RuntimeError> {
-        let arg = mem
-            .write()
-            .unwrap()
-            .append_object(Box::new(Arg(addr_vec.clone())))?;
-        for addr in addr_vec {
-            mem.write().unwrap().hold(arg, addr)?;
-        }
-        Ok(arg)
-    }
+pub enum ReadObject<'a, O, S> {
+    Local(&'a O),
+    Remote(RwLockReadGuard<'a, S>),
 }
 
-#[derive(Debug)]
-pub enum RuntimeError {
-    OutOfMemory,
-    UndefinedName(String),
-    EmptyEnvStack,
-    EmptyFrameStack,
-    TypeMismatch { expected: TypeId, actual: TypeId },
-    MissingObject(Addr),
-    NotCallable(Addr),
-    Unhandled(Addr),
-    NoSuchProp(Addr, String),
-}
+impl<'a, O, S> Deref for ReadObject<'a, O, S> where S: Deref<Target = O> {
+    type Target = O;
 
-impl From<MemoryError> for RuntimeError {
-    fn from(mem_err: MemoryError) -> Self {
-        match mem_err {
-            MemoryError::Full => RuntimeError::OutOfMemory,
-            MemoryError::InvalidAddr(addr) => RuntimeError::MissingObject(addr),
-        }
-    }
-}
-
-impl Display for RuntimeError {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    fn deref(&self) -> &Self::Target {
         match self {
-            RuntimeError::OutOfMemory => write!(f, "out of memory"),
-            RuntimeError::UndefinedName(pointer) => write!(f, "undefined pointer '{}'", pointer),
-            RuntimeError::EmptyEnvStack => write!(f, "poping last layer of env"),
-            RuntimeError::EmptyFrameStack => write!(f, "poping last layter of frame"),
-            RuntimeError::TypeMismatch { expected, actual } => {
-                write!(f, "expected type {:?}, found {:?}", expected, actual)
-            }
-            RuntimeError::MissingObject(pointer) => {
-                write!(f, "missing object for pointer '{:?}'", pointer)
-            }
-            RuntimeError::NotCallable(pointer) => {
-                write!(f, "attempt to call non-callable object '{:?}'", pointer)
-            }
-            RuntimeError::Unhandled(pointer) => write!(f, "unhandled error {:?}", pointer),
-            RuntimeError::NoSuchProp(pointer, prop_key) => {
-                write!(f, "object '{:?}' don't have property {}", pointer, prop_key)
-            }
+            ReadObject::Local(object) => object,
+            ReadObject::Remote(guard) => guard,
         }
     }
 }
 
-impl Error for RuntimeError {}
-
-struct Frame {
-    env_stack: Vec<Addr>,
+pub enum WriteObject<'a, O, S> {
+    Local(&'a mut O),
+    Remote(RwLockWriteGuard<'a, S>),
 }
 
-struct Env {
-    name_map: HashMap<String, Addr>,
+impl<'a, O, S> Deref for WriteObject<'a, O, S> where S: Deref<Target = O> {
+    type Target = O;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            WriteObject::Local(object) => object,
+            WriteObject::Remote(guard) => guard,
+        }
+    }
 }
 
-impl Env {
-    fn new() -> Self {
+impl<'a, O, S> DerefMut for WriteObject<'a, O, S> where S: DerefMut<Target = O> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            WriteObject::Local(object) => object,
+            WriteObject::Remote(guard) => guard,
+        }
+    }
+}
+
+pub struct Runtime<O, S> {
+    memory: Memory<QuasiObject<O, S>>,
+}
+
+impl<O, S> Runtime<O, S> where S: Sync + From<O> + DerefMut<Target = O>  {
+    pub fn new(count: usize) -> Self {
         Self {
-            name_map: HashMap::new(),
+            memory: Memory::new(count),
         }
     }
 
-    fn find_object(&self, pointer: &str) -> Option<Addr> {
-        self.name_map.get(pointer).cloned()
+    pub fn insert(&mut self, object: O) -> Result<usize, RuntimeError> {
+        self.memory.insert(QuasiObject::Local(object))
     }
 
-    fn insert_object(&mut self, pointer: &str, object: Addr) {
-        self.name_map.insert(pointer.to_string(), object);
-    }
-}
-
-impl Object for Env {}
-
-impl PropObject for Env {
-    fn get_prop(&self, key: &str) -> Option<Addr> {
-        self.find_object(key)
-    }
-
-    fn set_prop(&mut self, key: &str, prop: Addr) {
-        self.insert_object(key, prop)
-    }
-}
-
-impl AsMethod for Env {}
-
-impl CloneObject for Env {}
-
-impl Frame {
-    fn new(mem: Memory, parent: Option<Addr>) -> Result<Self, RuntimeError> {
-        let first_env = mem.write().unwrap().append_object(Box::new(Env::new()))?;
-        let frame = Frame {
-            env_stack: vec![first_env],
-        };
-        if let Some(parent_addr) = parent {
-            mem.write()
-                .unwrap()
-                .hold(first_env, parent_addr)
-                .expect("first_env -> parent_addr");
+    pub fn insert_remote(
+        &mut self,
+        remote_runtime: &Runtime<O, S>,
+        remote_id: usize,
+    ) -> Result<usize, RuntimeError> {
+        if let QuasiObject::Remote(remote) = remote_runtime.memory.get(remote_id)? {
+            self.memory.insert(QuasiObject::Remote(Arc::clone(remote)))
+        } else {
+            panic!();
         }
-        mem.write()
-            .unwrap()
-            .set_root(first_env)
-            .expect("root <- first_env");
-        Ok(frame)
     }
 
-    fn push_env(&mut self, mem: Memory) -> Result<(), RuntimeError> {
-        let env = mem.write().unwrap().append_object(Box::new(Env::new()))?;
-        mem.write()
-            .unwrap()
-            .hold(env, *self.env_stack.last().expect("env_stack.last()"))
-            .expect("env -> prev env");
-        mem.write().unwrap().set_root(env).expect("root <- env");
-        self.env_stack.push(env);
-        Ok(())
-    }
-
-    fn pop_env(&mut self, mem: Memory) -> Result<(), RuntimeError> {
-        self.env_stack.pop();
-        mem.write()
-            .unwrap()
-            .set_root(*self.env_stack.last().ok_or(RuntimeError::EmptyEnvStack)?)
-            .expect("root <- prev env");
-        Ok(())
-    }
-
-    fn insert_object(&self, mem: Memory, pointer: &str, object: Addr) -> Result<(), MemoryError> {
-        mem.write()
-            .unwrap()
-            .set_object_property(self.current_env(), pointer, object)
-    }
-
-    fn find_object(&self, mem: Memory, pointer: &str) -> Result<Addr, RuntimeError> {
-        for env in self.env_stack.iter().rev() {
-            if let Some(object) = mem
-                .read()
-                .unwrap()
-                .get_object(*env)
-                .expect("env in env_stack")
-                .as_prop()
-                .expect("env AsProp")
-                .get_prop(pointer)
-            {
-                return Ok(object);
+    pub fn share(&mut self, local_id: usize) -> Result<(), RuntimeError> {
+        let mut queue = VecDeque::new();
+        queue.push_back(local_id);
+        while let Some(local_id) = queue.pop_front() {
+            if let QuasiObject::Remote(_) = self.memory.get(local_id)? {
+                continue;
+            }
+            for holdee_id in self.memory.iter_holdee(local_id) {
+                queue.push_back(*holdee_id);
+            }
+            if let QuasiObject::Local(object) = self.memory.replace(local_id, QuasiObject::Temp)? {
+                let remote = Arc::new(RwLock::new(object.into()));
+                self.memory.replace(local_id, QuasiObject::Remote(remote))?;
+            } else {
+                panic!();
             }
         }
-        Err(RuntimeError::UndefinedName(pointer.to_string()))
+        Ok(())
     }
 
-    fn current_env(&self) -> Addr {
-        self.env_stack.last().expect("current env").to_owned()
-    }
-}
-
-pub struct GetObject<'a>(ReadLock<'a, RawMemory>, Addr);
-
-impl<'a> GetObject<'a> {
-    pub fn to<T: Any>(&self) -> Result<&T, RuntimeError> {
-        let GetObject(mem, addr) = self;
-        let obj = mem.get_object(*addr)?.as_any();
-        obj.downcast_ref::<T>().ok_or(RuntimeError::TypeMismatch {
-            expected: TypeId::of::<T>(),
-            actual: obj.type_id(),
-        })
-    }
-}
-
-pub fn make_shared(raw_mem: RawMemory) -> Memory {
-    Arc::new(ShardedLock::new(raw_mem))
-}
-
-impl Runtime {
-    pub fn new(mem: Memory) -> Result<Self, RuntimeError> {
-        let first_frame = Frame::new(Arc::clone(&mem), None)?;
-        let arg_object = Arg::insert(Vec::new(), Arc::clone(&mem))?;
-        let runtime = Runtime {
-            mem: Arc::clone(&mem),
-            context_object: first_frame.current_env(),
-            frame_stack: vec![first_frame],
-            arg_object,
+    pub fn read(&self, object_id: usize) -> Result<ReadObject<O, S>, RuntimeError> {
+        let read = match self.memory.get(object_id)? {
+            QuasiObject::Local(object) => ReadObject::Local(object),
+            QuasiObject::Remote(remote) => ReadObject::Remote(
+                remote
+                    .try_read()
+                    .map_err(|_| RuntimeError::AccessConflict)?,
+            ),
+            QuasiObject::Temp => panic!("inconsistent"),
         };
-        runtime.hold_arg()?;
-        Ok(runtime)
+        Ok(read)
     }
 
-    pub fn memory(&self) -> Memory {
-        Arc::clone(&self.mem)
+    pub fn write(&mut self, object_id: usize) -> Result<WriteObject<O, S>, RuntimeError> {
+        let read = match self.memory.get_mut(object_id)? {
+            QuasiObject::Local(object) => WriteObject::Local(object),
+            QuasiObject::Remote(remote) => WriteObject::Remote(
+                remote
+                    .try_write()
+                    .map_err(|_| RuntimeError::AccessConflict)?,
+            ),
+            QuasiObject::Temp => panic!("inconsistent"),
+        };
+        Ok(read)
     }
 
-    pub fn arg(&self) -> Addr {
-        self.arg_object
+    pub fn hold(&mut self, src: usize, dest: usize) -> Result<(), RuntimeError> {
+        self.memory.hold(src, dest)
     }
 
-    pub fn set_arg(&mut self, args: Addr) -> Result<(), RuntimeError> {
-        self.drop_arg()?;
-        self.arg_object = args;
-        self.hold_arg()?;
-        Ok(())
+    pub fn unhold(&mut self, src: usize, dest: usize) -> Result<(), RuntimeError> {
+        self.memory.unhold(src, dest)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct Object(i64);
+
+    impl Deref for Object {
+        type Target = Object;
+
+        fn deref(&self) -> &Self::Target {
+            self
+        }
     }
 
-    pub fn index_arg(&self, index: usize) -> Result<Addr, RuntimeError> {
-        let get_args = self.get_object(self.arg_object);
-        let Arg(args) = get_args.to()?;
-        Ok(*args.get(index).unwrap()) // TODO
+    impl DerefMut for Object {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            self
+        }
     }
 
-    fn drop_arg(&self) -> Result<(), RuntimeError> {
-        RawMemory::drop(
-            &mut self.mem.write().unwrap(),
-            self.current_frame().current_env(),
-            self.arg_object,
-        )
-        .map_err(Into::into)
+    #[test]
+    fn test_share_read() {
+        let mut run1: Runtime<Object, Object> = Runtime::new(16);
+        let mut run2: Runtime<Object, Object> = Runtime::new(16);
+        let id1 = run1.insert(Object(42)).unwrap();
+        run1.share(id1).unwrap();
+        let id2 = run2.insert_remote(&run1, id1).unwrap();
+        assert_eq!(
+            &run1.read(id1).unwrap() as &Object,
+            &run2.read(id2).unwrap() as &Object
+        );
     }
 
-    fn hold_arg(&self) -> Result<(), RuntimeError> {
-        self.mem
-            .write()
-            .unwrap()
-            .hold(self.current_frame().current_env(), self.arg_object)
-            .map_err(Into::into)
+    #[test]
+    fn test_share_write() {
+        let mut run1: Runtime<Object, Object> = Runtime::new(16);
+        let mut run2: Runtime<Object, Object> = Runtime::new(16);
+        let id1 = run1.insert(Object(42)).unwrap();
+        run1.share(id1).unwrap();
+        let id2 = run2.insert_remote(&run1, id1).unwrap();
+        run1.write(id1).unwrap().0 = 43;
+        assert_eq!(&run2.read(id2).unwrap() as &Object, &Object(43));
     }
 
-    pub fn push_frame(&mut self) -> Result<(), RuntimeError> {
-        let prev_env = self.current_frame().current_env();
-        let frame = Frame::new(Arc::clone(&self.mem), Some(prev_env))?;
-        self.frame_stack.push(frame);
-
-        self.hold_arg()?;
-        RawMemory::drop(&mut self.mem.write().unwrap(), prev_env, self.arg_object)?;
-
-        Ok(())
-    }
-
-    pub fn pop_frame(&mut self) -> Result<(), RuntimeError> {
-        let holder_env = self.frame_stack.last().unwrap().current_env();
-        self.frame_stack.pop();
-        let holdee_env = self
-            .frame_stack
-            .last()
-            .ok_or(RuntimeError::EmptyFrameStack)?
-            .current_env();
-
-        self.hold_arg()?;
-
-        // if holder_env keeps alive because returned closure, it should not cause holdee_env
-        // to be alive because holdee_env is invisible to the closure
-        RawMemory::drop(&mut self.mem.write().unwrap(), holder_env, holdee_env)?;
-        self.mem
-            .write()
-            .unwrap()
-            .set_root(holdee_env)
-            .expect("root <- current env");
-        Ok(())
-    }
-
-    pub fn push_env(&mut self) -> Result<(), RuntimeError> {
-        let mem = Arc::clone(&self.mem);
-        self.current_frame_mut().push_env(mem)
-    }
-
-    pub fn pop_env(&mut self) -> Result<(), RuntimeError> {
-        let mem = Arc::clone(&self.mem);
-        self.current_frame_mut().pop_env(mem)
-    }
-
-    pub fn get_object(&self, addr: Addr) -> GetObject {
-        GetObject(self.mem.read().unwrap(), addr)
-    }
-
-    pub fn replace_object(&self, dest: Addr, src: Box<dyn Object>) -> Box<dyn Object> {
-        self.mem.write().unwrap().replace_object(dest, src)
-    }
-
-    pub fn garbage_collect(&mut self) {
-        self.mem.write().unwrap().collect();
-    }
-
-    // <pointer> = <object>
-    pub fn append_object(&mut self, object: Box<dyn Object>) -> Result<Addr, RuntimeError> {
-        self.mem
-            .write()
-            .unwrap()
-            .append_object(object)
-            .map_err(Into::into)
-    }
-
-    // env_name = <pointer>
-    pub fn insert_name(&mut self, name: &str, addr: Addr) -> Result<(), RuntimeError> {
-        self.current_frame()
-            .insert_object(Arc::clone(&self.mem), name, addr)
-            .map_err(Into::into)
-    }
-
-    // <pointer> = env_name
-    pub fn find_name(&self, env_name: &str) -> Result<Addr, RuntimeError> {
-        self.current_frame()
-            .find_object(Arc::clone(&self.mem), env_name)
-    }
-
-    fn current_frame(&self) -> &Frame {
-        self.frame_stack.last().expect("current frame")
-    }
-
-    fn current_frame_mut(&mut self) -> &mut Frame {
-        self.frame_stack.last_mut().expect("current frame")
-    }
-
-    // <pointer> = object.prop
-    pub fn get_property(&self, object: Addr, prop: &str) -> Result<Addr, RuntimeError> {
-        Ok(self
-            .mem
-            .read()
-            .unwrap()
-            .get_object(object)?
-            .as_prop()
-            .unwrap() // TODO
-            .get_prop(prop)
-            .ok_or_else(|| RuntimeError::NoSuchProp(object, prop.to_string()))?)
-    }
-
-    // object.prop = <pointer>
-    pub fn set_property(
-        &mut self,
-        object: Addr,
-        prop: &str,
-        addr: Addr,
-    ) -> Result<(), RuntimeError> {
-        self.mem
-            .write()
-            .unwrap()
-            .set_object_property(object, prop, addr)
-            .map_err(Into::into)
-    }
-
-    // <pointer> = this
-    pub fn context(&self) -> Addr {
-        self.context_object
-    }
-
-    // this = <pointer>
-    pub fn set_context(&mut self, addr: Addr) {
-        self.context_object = addr;
-    }
-
-    // <method>(&{args})
-    pub fn run_method(&mut self, method: Addr) -> Result<(), RuntimeError> {
-        self.push_frame()?;
-
-        let cloned_method = self
-            .mem
-            .read()
-            .unwrap()
-            .get_object(method)?
-            .clone_object()
-            .unwrap(); // TODO
-        let method_object = cloned_method
-            .as_method()
-            .ok_or_else(|| RuntimeError::NotCallable(method))?;
-        method_object.run(self)?;
-
-        self.pop_frame()?;
-        Ok(())
+    #[test]
+    fn test_access_conflict() {
+        let mut run1: Runtime<Object, Object> = Runtime::new(16);
+        let mut run2: Runtime<Object, Object> = Runtime::new(16);
+        let id1 = run1.insert(Object(42)).unwrap();
+        run1.share(id1).unwrap();
+        let id2 = run2.insert_remote(&run1, id1).unwrap();
+        let _obj1 = run1.read(id1).unwrap();
+        assert!(run2.write(id2).is_err());
     }
 }
