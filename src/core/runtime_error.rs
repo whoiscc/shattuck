@@ -7,6 +7,7 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 pub enum RuntimeError {
     SegFault,
     AccessConflict,
+    MemoryFull,
 }
 
 impl Display for RuntimeError {
@@ -14,6 +15,7 @@ impl Display for RuntimeError {
         match self {
             RuntimeError::SegFault => write!(f, "segfault"),
             RuntimeError::AccessConflict => write!(f, "access conflict"),
+            RuntimeError::MemoryFull => write!(f, "memory full"),
         }
     }
 }

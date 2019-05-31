@@ -1,112 +1,98 @@
 //
 
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::error::Error;
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use crate::core::inc::Inc;
+use crate::core::runtime_error::RuntimeError;
 
-#[derive(Clone, Copy, Hash, Debug, PartialEq, Eq)]
-pub struct Addr(usize);
+use std::collections::{HashMap, HashSet, VecDeque};
 
 pub struct Memory<O> {
     max_object_count: usize,
     // the space actually saved (the pointers of) the objects
-    objects: HashMap<Addr, O>,
-    // counter for Addr and PrivAddr
-    next_addr: usize,
+    objects: HashMap<usize, O>,
+    // counter for usize and Privusize
+    next_addr: Inc,
     // root index in `to_space`
-    root_addr: Option<Addr>,
+    root_addr: Option<usize>,
     // reference map, keys and values are indices of `to_space`
-    ref_map: HashMap<Addr, HashSet<Addr>>,
+    ref_map: HashMap<usize, HashSet<usize>>,
 }
-
-#[derive(Debug)]
-pub enum MemoryError {
-    Full,
-    InvalidAddr(Addr),
-}
-
-impl Display for MemoryError {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        match self {
-            MemoryError::Full => write!(f, "memory is full"),
-            MemoryError::InvalidAddr(_) => write!(f, "access invalid address"),
-        }
-    }
-}
-
-impl Error for MemoryError {}
 
 impl<O> Memory<O> {
     pub fn new(count: usize) -> Self {
         Memory {
             max_object_count: count,
             objects: HashMap::new(),
-            next_addr: 0,
+            next_addr: Inc::new(),
             root_addr: None,
             ref_map: HashMap::new(),
         }
     }
 
-    pub fn append_object(&mut self, object: O) -> Result<Addr, MemoryError> {
+    pub fn insert(&mut self, object: O) -> Result<usize, RuntimeError> {
         if self.objects.len() == self.max_object_count {
             self.collect();
         }
 
         if self.objects.len() == self.max_object_count {
-            return Err(MemoryError::Full);
+            return Err(RuntimeError::MemoryFull);
         }
-        let addr = self.allocate_addr();
+        let addr = self.next_addr.create();
         self.objects.insert(addr, object);
         self.ref_map.insert(addr, HashSet::new());
         Ok(addr)
     }
 
-    pub fn get_object(&self, addr: Addr) -> Result<&O, MemoryError> {
+    pub fn get(&self, addr: usize) -> Result<&O, RuntimeError> {
         self.objects
             .get(&addr)
-            .ok_or_else(|| MemoryError::InvalidAddr(addr))
+            .ok_or_else(|| RuntimeError::SegFault)
     }
 
-    pub fn get_object_mut(&mut self, addr: Addr) -> Result<&mut O, MemoryError> {
+    pub fn get_mut(&mut self, addr: usize) -> Result<&mut O, RuntimeError> {
         self.objects
             .get_mut(&addr)
-            .ok_or_else(|| MemoryError::InvalidAddr(addr))
+            .ok_or_else(|| RuntimeError::SegFault)
     }
 
-    pub fn replace_object(&mut self, dest: Addr, src: O) -> Result<O, MemoryError> {
+    pub fn replace(&mut self, dest: usize, src: O) -> Result<O, RuntimeError> {
         let replaced = self
             .objects
             .remove(&dest)
-            .ok_or_else(|| MemoryError::InvalidAddr(dest))?;
+            .ok_or_else(|| RuntimeError::SegFault)?;
         self.objects.insert(dest, src);
         Ok(replaced)
     }
 
-    pub fn set_root(&mut self, addr: Addr) -> Result<(), MemoryError> {
-        self.get_object(addr)?;
+    pub fn set_root(&mut self, addr: usize) -> Result<(), RuntimeError> {
+        self.get(addr)?;
         self.root_addr = Some(addr);
         Ok(())
     }
 
-    pub fn hold(&mut self, holder: Addr, holdee: Addr) -> Result<(), MemoryError> {
-        self.get_object(holdee)?;
+    pub fn hold(&mut self, holder: usize, holdee: usize) -> Result<(), RuntimeError> {
+        self.get(holdee)?;
         self.ref_map
             .get_mut(&holder)
-            .ok_or_else(|| MemoryError::InvalidAddr(holder))?
+            .ok_or_else(|| RuntimeError::SegFault)?
             .insert(holdee);
         Ok(())
     }
 
-    pub fn unhold(&mut self, holder: Addr, holdee: Addr) -> Result<(), MemoryError> {
-        self.get_object(holdee)?;
+    pub fn unhold(&mut self, holder: usize, holdee: usize) -> Result<(), RuntimeError> {
+        self.get(holdee)?;
         self.ref_map
             .get_mut(&holder)
-            .ok_or_else(|| MemoryError::InvalidAddr(holder))?
+            .ok_or_else(|| RuntimeError::SegFault)?
             .remove(&holdee);
         Ok(())
     }
 
-    pub fn replace_hold(&mut self, holder: Addr, old: Addr, new: Addr) -> Result<(), MemoryError> {
+    pub fn replace_hold(
+        &mut self,
+        holder: usize,
+        old: usize,
+        new: usize,
+    ) -> Result<(), RuntimeError> {
         self.unhold(holder, old)?;
         self.hold(holder, new)?;
         Ok(())
@@ -116,8 +102,8 @@ impl<O> Memory<O> {
         use std::time::Instant;
         let now = Instant::now();
 
-        let mut queue = VecDeque::<Addr>::new();
-        let mut dead_set: HashSet<Addr> = self.objects.keys().cloned().collect();
+        let mut queue = VecDeque::<usize>::new();
+        let mut dead_set: HashSet<usize> = self.objects.keys().cloned().collect();
         if let Some(root_addr) = self.root_addr {
             queue.push_back(root_addr);
         }
@@ -148,15 +134,19 @@ impl<O> Memory<O> {
             now.elapsed().as_micros() as f64 / 1000.0
         );
     }
-
-    fn allocate_addr(&mut self) -> Addr {
-        let addr = Addr(self.next_addr);
-        self.next_addr += 1;
-        addr
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    //
+    use super::*;
+
+    #[derive(Clone, PartialEq, Eq, Debug)]
+    struct Object(i64);
+
+    #[test]
+    fn test_insert() {
+        let mut mem = Memory::new(16);
+        let object_id = mem.insert(Object(42)).unwrap();
+        assert_eq!(mem.get(object_id).unwrap(), &Object(42));
+    }
 }

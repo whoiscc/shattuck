@@ -15,17 +15,22 @@ struct CountedObject<O> {
 struct SharedMemoryPriv<O> {
     objects: HashMap<usize, CountedObject<O>>,
     object_id: Inc,
+    max_count: usize,
 }
 
 impl<O> SharedMemoryPriv<O> {
-    fn new() -> Self {
+    fn new(count: usize) -> Self {
         Self {
             objects: HashMap::new(),
             object_id: Inc::new(),
+            max_count: count,
         }
     }
 
-    fn insert(&mut self, object: O) -> usize {
+    fn insert(&mut self, object: O) -> Result<usize, RuntimeError> {
+        if self.objects.len() == self.max_count {
+            return Err(RuntimeError::MemoryFull);
+        }
         let object_id = self.object_id.create();
         self.objects.insert(
             object_id,
@@ -34,7 +39,7 @@ impl<O> SharedMemoryPriv<O> {
                 count: 0,
             },
         );
-        object_id
+        Ok(object_id)
     }
 
     fn hold(&mut self, object_id: usize) -> Result<(), RuntimeError> {
@@ -64,13 +69,13 @@ pub struct SharedMemory<O> {
 }
 
 impl<O> SharedMemory<O> {
-    pub fn new() -> Self {
+    pub fn new(count: usize) -> Self {
         Self {
-            internal: Arc::new(RwLock::new(SharedMemoryPriv::new())),
+            internal: Arc::new(RwLock::new(SharedMemoryPriv::new(count))),
         }
     }
 
-    pub fn insert(&self, object: O) -> usize {
+    pub fn insert(&self, object: O) -> Result<usize, RuntimeError> {
         self.internal.write().unwrap().insert(object)
     }
 
@@ -84,6 +89,7 @@ impl<O> SharedMemory<O> {
     }
 }
 
+#[derive(Clone)]
 pub struct RemoteObject<O> {
     internal: Arc<RwLock<SharedMemoryPriv<O>>>,
     object_id: usize,
@@ -131,7 +137,7 @@ impl<'a, O> RemoteObjectGuard<'a, O> {
                 .expect("segfault")
                 .object
                 .try_read()
-                .map_err(|_| RuntimeError::AccessConflict)?
+                .map_err(|_| RuntimeError::AccessConflict)?,
         };
         Ok(read)
     }
@@ -182,8 +188,8 @@ mod tests {
 
     #[test]
     fn test_share_read() {
-        let shared = SharedMemory::<Object>::new();
-        let obj_id = shared.insert(Object(42));
+        let shared = SharedMemory::<Object>::new(16);
+        let obj_id = shared.insert(Object(42)).unwrap();
         let remote1 = shared.distribute(obj_id).unwrap();
         let remote2 = shared.distribute(obj_id).unwrap();
         assert_eq!(&remote1.get().read().unwrap() as &Object, &Object(42));
@@ -192,8 +198,8 @@ mod tests {
 
     #[test]
     fn test_share_read_write() {
-        let shared = SharedMemory::<Object>::new();
-        let obj_id = shared.insert(Object(42));
+        let shared = SharedMemory::<Object>::new(16);
+        let obj_id = shared.insert(Object(42)).unwrap();
         let remote1 = shared.distribute(obj_id).unwrap();
         let remote2 = shared.distribute(obj_id).unwrap();
         *(&mut remote1.get().write().unwrap().0) = 43;
@@ -202,8 +208,8 @@ mod tests {
 
     #[test]
     fn test_collect() {
-        let shared = SharedMemory::<Object>::new();
-        let obj_id = shared.insert(Object(42));
+        let shared = SharedMemory::<Object>::new(16);
+        let obj_id = shared.insert(Object(42)).unwrap();
         {
             let _remote = shared.distribute(obj_id).unwrap();
         }
