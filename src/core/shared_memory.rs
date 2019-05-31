@@ -122,7 +122,7 @@ pub struct WriteRemoteObject<'a, O> {
 }
 
 impl<'a, O> RemoteObjectGuard<'a, O> {
-    pub fn read(&self) -> ReadRemoteObject<O> {
+    pub fn read(&self) -> Result<ReadRemoteObject<O>, RuntimeError> {
         let read = ReadRemoteObject {
             guard: self
                 .guard
@@ -130,13 +130,13 @@ impl<'a, O> RemoteObjectGuard<'a, O> {
                 .get(&self.object_id)
                 .expect("segfault")
                 .object
-                .read()
-                .unwrap(),
+                .try_read()
+                .map_err(|_| RuntimeError::AccessConflict)?
         };
-        read
+        Ok(read)
     }
 
-    pub fn write(&self) -> WriteRemoteObject<O> {
+    pub fn write(&self) -> Result<WriteRemoteObject<O>, RuntimeError> {
         let write = WriteRemoteObject {
             guard: self
                 .guard
@@ -145,9 +145,9 @@ impl<'a, O> RemoteObjectGuard<'a, O> {
                 .expect("segfault")
                 .object
                 .write()
-                .unwrap(),
+                .map_err(|_| RuntimeError::AccessConflict)?,
         };
-        write
+        Ok(write)
     }
 }
 
@@ -186,8 +186,8 @@ mod tests {
         let obj_id = shared.insert(Object(42));
         let remote1 = shared.distribute(obj_id).unwrap();
         let remote2 = shared.distribute(obj_id).unwrap();
-        assert_eq!(&remote1.get().read() as &Object, &Object(42));
-        assert_eq!(&remote2.get().read() as &Object, &Object(42));
+        assert_eq!(&remote1.get().read().unwrap() as &Object, &Object(42));
+        assert_eq!(&remote2.get().read().unwrap() as &Object, &Object(42));
     }
 
     #[test]
@@ -196,8 +196,8 @@ mod tests {
         let obj_id = shared.insert(Object(42));
         let remote1 = shared.distribute(obj_id).unwrap();
         let remote2 = shared.distribute(obj_id).unwrap();
-        *(&mut remote1.get().write().0) = 43;
-        assert_eq!(&remote2.get().read() as &Object, &Object(43));
+        *(&mut remote1.get().write().unwrap().0) = 43;
+        assert_eq!(&remote2.get().read().unwrap() as &Object, &Object(43));
     }
 
     #[test]
