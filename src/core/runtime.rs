@@ -18,7 +18,10 @@ pub enum ReadObject<'a, O, S> {
     Remote(RwLockReadGuard<'a, S>),
 }
 
-impl<'a, O, S> Deref for ReadObject<'a, O, S> where S: Deref<Target = O> {
+impl<'a, O, S> Deref for ReadObject<'a, O, S>
+where
+    S: Deref<Target = O>,
+{
     type Target = O;
 
     fn deref(&self) -> &Self::Target {
@@ -34,7 +37,10 @@ pub enum WriteObject<'a, O, S> {
     Remote(RwLockWriteGuard<'a, S>),
 }
 
-impl<'a, O, S> Deref for WriteObject<'a, O, S> where S: Deref<Target = O> {
+impl<'a, O, S> Deref for WriteObject<'a, O, S>
+where
+    S: Deref<Target = O>,
+{
     type Target = O;
 
     fn deref(&self) -> &Self::Target {
@@ -45,7 +51,10 @@ impl<'a, O, S> Deref for WriteObject<'a, O, S> where S: Deref<Target = O> {
     }
 }
 
-impl<'a, O, S> DerefMut for WriteObject<'a, O, S> where S: DerefMut<Target = O> {
+impl<'a, O, S> DerefMut for WriteObject<'a, O, S>
+where
+    S: DerefMut<Target = O>,
+{
     fn deref_mut(&mut self) -> &mut Self::Target {
         match self {
             WriteObject::Local(object) => object,
@@ -54,11 +63,16 @@ impl<'a, O, S> DerefMut for WriteObject<'a, O, S> where S: DerefMut<Target = O> 
     }
 }
 
+pub struct ShareObject<S>(Arc<RwLock<S>>);
+
 pub struct Runtime<O, S> {
     memory: Memory<QuasiObject<O, S>>,
 }
 
-impl<O, S> Runtime<O, S> where S: Sync + From<O> + DerefMut<Target = O>  {
+impl<O, S> Runtime<O, S>
+where
+    S: Sync + From<O> + DerefMut<Target = O>,
+{
     pub fn new(count: usize) -> Self {
         Self {
             memory: Memory::new(count),
@@ -69,21 +83,15 @@ impl<O, S> Runtime<O, S> where S: Sync + From<O> + DerefMut<Target = O>  {
         self.memory.insert(QuasiObject::Local(object))
     }
 
-    pub fn insert_remote(
-        &mut self,
-        remote_runtime: &Runtime<O, S>,
-        remote_id: usize,
-    ) -> Result<usize, RuntimeError> {
-        if let QuasiObject::Remote(remote) = remote_runtime.memory.get(remote_id)? {
-            self.memory.insert(QuasiObject::Remote(Arc::clone(remote)))
-        } else {
-            panic!();
-        }
+    pub fn insert_remote(&mut self, share_object: ShareObject<S>) -> Result<usize, RuntimeError> {
+        let ShareObject(remote) = share_object;
+        self.memory.insert(QuasiObject::Remote(remote))
     }
 
-    pub fn share(&mut self, local_id: usize) -> Result<(), RuntimeError> {
+    pub fn share(&mut self, local_id: usize) -> Result<ShareObject<S>, RuntimeError> {
         let mut queue = VecDeque::new();
         queue.push_back(local_id);
+        let mut share_object: Option<ShareObject<S>> = None;
         while let Some(local_id) = queue.pop_front() {
             if let QuasiObject::Remote(_) = self.memory.get(local_id)? {
                 continue;
@@ -93,12 +101,15 @@ impl<O, S> Runtime<O, S> where S: Sync + From<O> + DerefMut<Target = O>  {
             }
             if let QuasiObject::Local(object) = self.memory.replace(local_id, QuasiObject::Temp)? {
                 let remote = Arc::new(RwLock::new(object.into()));
+                if share_object.is_none() {
+                    share_object = Some(ShareObject(Arc::clone(&remote)));
+                }
                 self.memory.replace(local_id, QuasiObject::Remote(remote))?;
             } else {
                 panic!();
             }
         }
-        Ok(())
+        Ok(share_object.unwrap())
     }
 
     pub fn read(&self, object_id: usize) -> Result<ReadObject<O, S>, RuntimeError> {
@@ -162,8 +173,8 @@ mod tests {
         let mut run1: Runtime<Object, Object> = Runtime::new(16);
         let mut run2: Runtime<Object, Object> = Runtime::new(16);
         let id1 = run1.insert(Object(42)).unwrap();
-        run1.share(id1).unwrap();
-        let id2 = run2.insert_remote(&run1, id1).unwrap();
+        let share = run1.share(id1).unwrap();
+        let id2 = run2.insert_remote(share).unwrap();
         assert_eq!(
             &run1.read(id1).unwrap() as &Object,
             &run2.read(id2).unwrap() as &Object
@@ -175,8 +186,8 @@ mod tests {
         let mut run1: Runtime<Object, Object> = Runtime::new(16);
         let mut run2: Runtime<Object, Object> = Runtime::new(16);
         let id1 = run1.insert(Object(42)).unwrap();
-        run1.share(id1).unwrap();
-        let id2 = run2.insert_remote(&run1, id1).unwrap();
+        let share = run1.share(id1).unwrap();
+        let id2 = run2.insert_remote(share).unwrap();
         run1.write(id1).unwrap().0 = 43;
         assert_eq!(&run2.read(id2).unwrap() as &Object, &Object(43));
     }
@@ -186,8 +197,8 @@ mod tests {
         let mut run1: Runtime<Object, Object> = Runtime::new(16);
         let mut run2: Runtime<Object, Object> = Runtime::new(16);
         let id1 = run1.insert(Object(42)).unwrap();
-        run1.share(id1).unwrap();
-        let id2 = run2.insert_remote(&run1, id1).unwrap();
+        let share = run1.share(id1).unwrap();
+        let id2 = run2.insert_remote(share).unwrap();
         let _obj1 = run1.read(id1).unwrap();
         assert!(run2.write(id2).is_err());
     }
