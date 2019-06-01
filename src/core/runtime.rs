@@ -19,6 +19,7 @@ pub enum ReadObject<'a, L, S> {
 
 impl<'a, O, L, S> Deref for ReadObject<'a, L, S>
 where
+    O: ?Sized,
     S: Deref<Target = O>,
     L: Deref<Target = O>,
 {
@@ -39,6 +40,7 @@ pub enum WriteObject<'a, L, S> {
 
 impl<'a, O, L, S> Deref for WriteObject<'a, L, S>
 where
+    O: ?Sized,
     S: Deref<Target = O>,
     L: Deref<Target = O>,
 {
@@ -54,6 +56,7 @@ where
 
 impl<'a, O, L, S> DerefMut for WriteObject<'a, L, S>
 where
+    O: ?Sized,
     S: DerefMut<Target = O>,
     L: DerefMut<Target = O>,
 {
