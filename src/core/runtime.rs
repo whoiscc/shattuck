@@ -1,6 +1,5 @@
 //
 
-use std::collections::VecDeque;
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -94,27 +93,19 @@ where
     }
 
     pub fn share(&mut self, local_id: usize) -> Result<ShareObject<S>, RuntimeError> {
-        let mut queue = VecDeque::new();
-        queue.push_back(local_id);
-        let mut share_object: Option<ShareObject<S>> = None;
-        while let Some(local_id) = queue.pop_front() {
-            if let QuasiObject::Remote(_) = self.memory.get(local_id)? {
-                continue;
-            }
-            for holdee_id in self.memory.iter_holdee(local_id) {
-                queue.push_back(*holdee_id);
-            }
-            if let QuasiObject::Local(object) = self.memory.replace(local_id, QuasiObject::Temp)? {
-                let remote = Arc::new(RwLock::new(object.into()));
-                if share_object.is_none() {
-                    share_object = Some(ShareObject(Arc::clone(&remote)));
-                }
-                self.memory.replace(local_id, QuasiObject::Remote(remote))?;
-            } else {
-                panic!();
-            }
-        }
-        Ok(share_object.unwrap())
+        let remote = if let QuasiObject::Remote(remote) = self.memory.get(local_id)? {
+            Arc::clone(remote)
+        } else if let QuasiObject::Local(object) =
+            self.memory.replace(local_id, QuasiObject::Temp)?
+        {
+            let remote = Arc::new(RwLock::new(object.into()));
+            self.memory
+                .replace(local_id, QuasiObject::Remote(Arc::clone(&remote)))?;
+            remote
+        } else {
+            panic!();
+        };
+        Ok(ShareObject(remote))
     }
 
     pub fn read(&self, object_id: usize) -> Result<ReadObject<L, S>, RuntimeError> {
