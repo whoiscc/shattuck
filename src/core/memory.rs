@@ -1,6 +1,6 @@
 //
 
-use crate::core::inc::Inc;
+use crate::util::Inc;
 use crate::core::runtime_error::RuntimeError;
 
 use std::collections::{HashMap, HashSet, VecDeque};

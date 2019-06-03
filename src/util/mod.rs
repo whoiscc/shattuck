@@ -1,6 +1,6 @@
 //
 
-pub struct Inc(usize);
+pub(crate) struct Inc(usize);
 
 impl Inc {
     pub fn new() -> Self {
