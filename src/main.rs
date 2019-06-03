@@ -5,11 +5,16 @@ use std::ops::{Deref, DerefMut};
 use std::thread;
 
 extern crate shattuck;
-use shattuck::core::runtime::Runtime;
+use shattuck::core::runtime::{AsMethod, Method, Runtime};
+use shattuck::core::runtime_error::RuntimeError;
 
 trait DuckNum {
     fn get_num(&self) -> i64;
     fn set_num(&mut self, n: i64);
+
+    fn println(&self) {
+        println!("DuckNum: {}", self.get_num());
+    }
 }
 
 struct SharedNum(i64);
@@ -70,6 +75,19 @@ impl DerefMut for LocalNum {
     }
 }
 
+impl Method<LocalNum, SharedNum> for SharedNum {
+    fn run(&self, _runtime: &mut Runtime<LocalNum, SharedNum>) -> Result<(), RuntimeError> {
+        self.println();
+        Ok(())
+    }
+}
+
+impl AsMethod<LocalNum, SharedNum> for SharedNum {
+    fn as_method(&self) -> Result<&dyn Method<LocalNum, SharedNum>, RuntimeError> {
+        Ok(self)
+    }
+}
+
 fn main() {
     let mut host_runtime = Runtime::<LocalNum, SharedNum>::new(16);
     let host_id = host_runtime.insert(LocalNum(RefCell::new(42))).unwrap();
@@ -77,12 +95,9 @@ fn main() {
     let handle = thread::spawn(|| {
         let mut guest_runtime = Runtime::<LocalNum, SharedNum>::new(16);
         let guest_id = guest_runtime.insert_remote(share).unwrap();
-        {
-            let guest_object = guest_runtime.read(guest_id).unwrap();
-            println!("{:?}", guest_object.get_num());
-        }
+        guest_runtime.call(guest_id).unwrap();
         guest_runtime.write(guest_id).unwrap().set_num(43);
     });
     handle.join().unwrap();
-    println!("{:?}", host_runtime.read(host_id).unwrap().get_num());
+    host_runtime.call(host_id).unwrap();
 }

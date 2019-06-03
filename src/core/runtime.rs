@@ -146,6 +146,31 @@ where
     }
 }
 
+pub trait Method<L, S> {
+    fn run(&self, runtime: &mut Runtime<L, S>) -> Result<(), RuntimeError>;
+}
+
+pub trait AsMethod<L, S> {
+    fn as_method(&self) -> Result<&dyn Method<L, S>, RuntimeError> {
+        Err(RuntimeError::NotCallable)
+    }
+}
+
+impl<O, L, S> Runtime<L, S>
+where
+    O: ?Sized,
+    S: From<L> + DerefMut<Target = O> + AsMethod<L, S>,
+    L: DerefMut<Target = O>,
+{
+    pub fn call(&mut self, method: usize) -> Result<(), RuntimeError> {
+        let share_object = Arc::clone(&self.share(method)?.0);
+        let read_method = share_object
+            .read()
+            .map_err(|_| RuntimeError::AccessConflict)?;
+        read_method.as_method()?.run(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
