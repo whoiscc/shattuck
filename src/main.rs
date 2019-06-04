@@ -7,6 +7,7 @@ use std::thread;
 extern crate shattuck;
 use shattuck::core::runtime::{AsMethod, Method, Runtime};
 use shattuck::core::runtime_error::RuntimeError;
+use shattuck::util::addr_gen::Inc;
 
 trait DuckNum {
     fn get_num(&self) -> i64;
@@ -75,29 +76,31 @@ impl DerefMut for LocalNum {
     }
 }
 
-impl Method<LocalNum, SharedNum> for SharedNum {
-    fn run(&self, _runtime: &mut Runtime<LocalNum, SharedNum>) -> Result<(), RuntimeError> {
+type R = Runtime<LocalNum, SharedNum, usize, Inc>;
+
+impl Method<LocalNum, SharedNum, usize, Inc> for SharedNum {
+    fn run(&self, _runtime: &mut R) -> Result<(), RuntimeError> {
         self.println();
         Ok(())
     }
 }
 
-impl AsMethod<LocalNum, SharedNum> for SharedNum {
-    fn as_method(&self) -> Result<&dyn Method<LocalNum, SharedNum>, RuntimeError> {
+impl AsMethod<LocalNum, SharedNum, usize, Inc> for SharedNum {
+    fn as_method(&self) -> Result<&dyn Method<LocalNum, SharedNum, usize, Inc>, RuntimeError> {
         Ok(self)
     }
 }
 
 fn main() {
-    let mut host_runtime = Runtime::<LocalNum, SharedNum>::new(16);
+    let mut host_runtime = R::new(16, Inc::new());
     let host_id = host_runtime.insert(LocalNum(RefCell::new(42))).unwrap();
-    let share = host_runtime.share(host_id).unwrap();
+    let share = host_runtime.share(&host_id).unwrap();
     let handle = thread::spawn(|| {
-        let mut guest_runtime = Runtime::<LocalNum, SharedNum>::new(16);
+        let mut guest_runtime = R::new(16, Inc::new());
         let guest_id = guest_runtime.insert_remote(share).unwrap();
-        guest_runtime.call(guest_id).unwrap();
-        guest_runtime.write(guest_id).unwrap().set_num(43);
+        guest_runtime.call(&guest_id).unwrap();
+        guest_runtime.write(&guest_id).unwrap().set_num(43);
     });
     handle.join().unwrap();
-    host_runtime.call(host_id).unwrap();
+    host_runtime.call(&host_id).unwrap();
 }
