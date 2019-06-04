@@ -9,6 +9,7 @@ pub enum RuntimeError {
     AccessConflict,
     MemoryFull,
     NotCallable,
+    ContextNotSet,
 }
 
 impl Display for RuntimeError {
@@ -18,6 +19,7 @@ impl Display for RuntimeError {
             RuntimeError::AccessConflict => write!(f, "access conflict"),
             RuntimeError::MemoryFull => write!(f, "memory full"),
             RuntimeError::NotCallable => write!(f, "not callable"),
+            RuntimeError::ContextNotSet => write!(f, "context not set"),
         }
     }
 }

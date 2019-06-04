@@ -73,9 +73,14 @@ pub struct ShareObject<S>(Arc<RwLock<S>>);
 
 pub struct Runtime<L, S, A, G> {
     memory: Memory<QuasiObject<L, S>, A, G>,
+    frame_stack: Vec<Frame<A>>,
 }
 
-impl<O, L, S, A, G> Runtime<L, S, A, G>
+pub struct RuntimeBuilder<L, S, A, G> {
+    memory: Memory<QuasiObject<L, S>, A, G>,
+}
+
+impl<O, L, S, A, G> RuntimeBuilder<L, S, A, G>
 where
     O: ?Sized,
     S: From<L> + DerefMut<Target = O>,
@@ -87,6 +92,35 @@ where
         Self {
             memory: Memory::new(count, addr_gen),
         }
+    }
+
+    pub fn insert(&mut self, object: L) -> Result<A, RuntimeError> {
+        self.memory.insert(QuasiObject::Local(object))
+    }
+
+    pub fn insert_remote(&mut self, share_object: ShareObject<S>) -> Result<A, RuntimeError> {
+        let ShareObject(remote) = share_object;
+        self.memory.insert(QuasiObject::Remote(remote))
+    }
+}
+
+impl<O, L, S, A, G> Runtime<L, S, A, G>
+where
+    O: ?Sized,
+    S: From<L> + DerefMut<Target = O>,
+    L: DerefMut<Target = O>,
+    A: Hash + Eq + Clone,
+    G: AddrGen<Addr = A>,
+{
+    pub fn new(builder: RuntimeBuilder<L, S, A, G>, context: &A) -> Self {
+        Self {
+            memory: builder.memory,
+            frame_stack: vec![Frame::new(context)],
+        }
+    }
+
+    pub fn context(&self) -> &A {
+        &self.frame_stack.last().expect("current frame").context
     }
 
     pub fn insert(&mut self, object: L) -> Result<A, RuntimeError> {
@@ -172,67 +206,24 @@ where
         let read_method = share_object
             .read()
             .map_err(|_| RuntimeError::AccessConflict)?;
-        read_method.as_method()?.run(self)
+        self.frame_stack.push(Frame::new(method));
+        read_method.as_method()?.run(self)?;
+        self.frame_stack.pop().expect("pop previously pushed frame");
+        Ok(())
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+struct Frame<A> {
+    context: A,
+}
 
-    #[derive(Debug, PartialEq, Eq)]
-    struct Object(i64);
-
-    impl Deref for Object {
-        type Target = Object;
-
-        fn deref(&self) -> &Self::Target {
-            self
+impl<A> Frame<A>
+where
+    A: Clone,
+{
+    fn new(context: &A) -> Self {
+        Self {
+            context: context.to_owned(),
         }
-    }
-
-    impl DerefMut for Object {
-        fn deref_mut(&mut self) -> &mut Self::Target {
-            self
-        }
-    }
-
-    use crate::util::addr_gen::Inc;
-
-    type SimpleRuntime<T> = Runtime<T, T, usize, Inc>;
-
-    #[test]
-    fn test_share_read() {
-        let mut run1 = SimpleRuntime::new(16, Inc::new());
-        let mut run2 = SimpleRuntime::new(16, Inc::new());
-        let id1 = run1.insert(Object(42)).unwrap();
-        let share = run1.share(&id1).unwrap();
-        let id2 = run2.insert_remote(share).unwrap();
-        assert_eq!(
-            &run1.read(&id1).unwrap() as &Object,
-            &run2.read(&id2).unwrap() as &Object
-        );
-    }
-
-    #[test]
-    fn test_share_write() {
-        let mut run1 = SimpleRuntime::new(16, Inc::new());
-        let mut run2 = SimpleRuntime::new(16, Inc::new());
-        let id1 = run1.insert(Object(42)).unwrap();
-        let share = run1.share(&id1).unwrap();
-        let id2 = run2.insert_remote(share).unwrap();
-        run1.write(&id1).unwrap().0 = 43;
-        assert_eq!(&run2.read(&id2).unwrap() as &Object, &Object(43));
-    }
-
-    #[test]
-    fn test_access_conflict() {
-        let mut run1 = SimpleRuntime::new(16, Inc::new());
-        let mut run2 = SimpleRuntime::new(16, Inc::new());
-        let id1 = run1.insert(Object(42)).unwrap();
-        let share = run1.share(&id1).unwrap();
-        let id2 = run2.insert_remote(share).unwrap();
-        let _obj1 = run1.read(&id1).unwrap();
-        assert!(run2.write(&id2).is_err());
     }
 }

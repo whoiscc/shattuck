@@ -92,15 +92,5 @@ impl AsMethod<LocalNum, SharedNum, usize, Inc> for SharedNum {
 }
 
 fn main() {
-    let mut host_runtime = R::new(16, Inc::new());
-    let host_id = host_runtime.insert(LocalNum(RefCell::new(42))).unwrap();
-    let share = host_runtime.share(&host_id).unwrap();
-    let handle = thread::spawn(|| {
-        let mut guest_runtime = R::new(16, Inc::new());
-        let guest_id = guest_runtime.insert_remote(share).unwrap();
-        guest_runtime.call(&guest_id).unwrap();
-        guest_runtime.write(&guest_id).unwrap().set_num(43);
-    });
-    handle.join().unwrap();
-    host_runtime.call(&host_id).unwrap();
+    //
 }
