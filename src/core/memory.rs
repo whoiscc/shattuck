@@ -5,7 +5,7 @@ use crate::core::runtime_error::RuntimeError;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::Hash;
 
-pub struct Memory<O, A, G> {
+pub(crate) struct Memory<O, A, G> {
     max_object_count: usize,
     objects: HashMap<A, O>,
     pub next_addr: G,
@@ -72,7 +72,7 @@ where
 
 impl<A> RefMap<A>
 where
-    A: Hash + Eq + Clone,
+    A: Hash + Eq,
 {
     fn new() -> Self {
         Self {
@@ -87,25 +87,19 @@ where
         Ok(())
     }
 
-    pub fn hold(&mut self, holder: &A, holdee: &A) -> Result<(), RuntimeError> {
+    pub fn hold(&mut self, holder: A, holdee: A) -> Result<(), RuntimeError> {
         self.graph
-            .get_mut(holder)
+            .get_mut(&holder)
             .ok_or_else(|| RuntimeError::SegFault)?
-            .insert(holdee.to_owned());
+            .insert(holdee);
         Ok(())
     }
 
-    pub fn unhold(&mut self, holder: &A, holdee: &A) -> Result<(), RuntimeError> {
+    pub fn unhold(&mut self, holder: A, holdee: A) -> Result<(), RuntimeError> {
         self.graph
-            .get_mut(holder)
+            .get_mut(&holder)
             .ok_or_else(|| RuntimeError::SegFault)?
-            .remove(holdee);
-        Ok(())
-    }
-
-    pub fn replace_hold(&mut self, holder: &A, old: &A, new: &A) -> Result<(), RuntimeError> {
-        self.unhold(holder, old)?;
-        self.hold(holder, new)?;
+            .remove(&holdee);
         Ok(())
     }
 }
