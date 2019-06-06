@@ -8,8 +8,6 @@ pub enum RuntimeError {
     SegFault,
     AccessConflict,
     MemoryFull,
-    NotCallable,
-    NotSharable,
     TypeMismatch,
 }
 
@@ -19,8 +17,6 @@ impl Display for RuntimeError {
             RuntimeError::SegFault => write!(f, "segfault"),
             RuntimeError::AccessConflict => write!(f, "access conflict"),
             RuntimeError::MemoryFull => write!(f, "memory full"),
-            RuntimeError::NotCallable => write!(f, "not callable"),
-            RuntimeError::NotSharable => write!(f, "not sharable"),
             RuntimeError::TypeMismatch => write!(f, "type mismatch"),
         }
     }

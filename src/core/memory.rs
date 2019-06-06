@@ -10,16 +10,18 @@ pub enum QuasiObject {
     Shared(SharedObject),
 }
 
+pub type Addr = usize;
+
 pub struct Memory {
     max_object_count: usize,
-    objects: HashMap<usize, QuasiObject>,
-    next_addr: usize,
+    objects: HashMap<Addr, QuasiObject>,
+    next_addr: Addr,
     pub ref_map: RefMap,
 }
 
 pub struct RefMap {
-    entry: Option<usize>,
-    graph: HashMap<usize, HashSet<usize>>,
+    entry: Option<Addr>,
+    graph: HashMap<Addr, HashSet<Addr>>,
 }
 
 impl Memory {
@@ -32,7 +34,7 @@ impl Memory {
         }
     }
 
-    pub fn insert(&mut self, object: QuasiObject) -> Result<usize, RuntimeError> {
+    pub fn insert(&mut self, object: QuasiObject) -> Result<Addr, RuntimeError> {
         if self.objects.len() == self.max_object_count {
             self.collect();
         }
@@ -47,19 +49,19 @@ impl Memory {
         Ok(addr)
     }
 
-    pub fn get(&self, addr: usize) -> Result<&QuasiObject, RuntimeError> {
+    pub fn get(&self, addr: Addr) -> Result<&QuasiObject, RuntimeError> {
         self.objects
             .get(&addr)
             .ok_or_else(|| RuntimeError::SegFault)
     }
 
-    pub fn get_mut(&mut self, addr: usize) -> Result<&mut QuasiObject, RuntimeError> {
+    pub fn get_mut(&mut self, addr: Addr) -> Result<&mut QuasiObject, RuntimeError> {
         self.objects
             .get_mut(&addr)
             .ok_or_else(|| RuntimeError::SegFault)
     }
 
-    pub fn replace(&mut self, dest: usize, src: QuasiObject) -> Result<QuasiObject, RuntimeError> {
+    pub fn replace(&mut self, dest: Addr, src: QuasiObject) -> Result<QuasiObject, RuntimeError> {
         let replaced = self
             .objects
             .remove(&dest)
@@ -77,17 +79,17 @@ impl RefMap {
         }
     }
 
-    pub fn set_entry(&mut self, addr: usize) -> Result<(), RuntimeError> {
+    pub fn set_entry(&mut self, addr: Addr) -> Result<(), RuntimeError> {
         self.entry = Some(addr);
         Ok(())
     }
 
-    pub fn hold(&mut self, holder: usize, holdee: usize) -> Result<(), RuntimeError> {
+    pub fn hold(&mut self, holder: Addr, holdee: Addr) -> Result<(), RuntimeError> {
         self.graph.get_mut(&holder).unwrap().insert(holdee);
         Ok(())
     }
 
-    pub fn unhold(&mut self, holder: usize, holdee: usize) -> Result<(), RuntimeError> {
+    pub fn unhold(&mut self, holder: Addr, holdee: Addr) -> Result<(), RuntimeError> {
         self.graph.get_mut(&holder).unwrap().remove(&holdee);
         Ok(())
     }

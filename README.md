@@ -4,6 +4,6 @@
 
 Shattuck is a script programming language powered by Rust. Have a look at `src/main.rs` to find out some basic usage.
 
-Check out [article series on Zhihu][1] (in Chinese).
+Check out [article series on Zhihu][1] (in Chinese and few in terrible English).
 
 [1]: https://zhuanlan.zhihu.com/p/65376093
