@@ -3,6 +3,7 @@
 use std::collections::VecDeque;
 use std::hash::Hash;
 use std::iter::Iterator;
+use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -40,22 +41,51 @@ pub enum WriteObject<'a, L, S> {
     Shared(RwLockWriteGuard<'a, S>),
 }
 
-pub struct ShareObject<S>(Arc<RwLock<S>>);
-
-pub trait IntoShared<S> {
-    type Iter;
-    fn into_shared(self) -> Result<(S, Self::Iter), RuntimeError>;
-}
-
-pub struct Runtime<L, S, A, G> {
-    memory: Memory<QuasiObject<L, S>, A, G>,
-    frame_stack: Vec<Frame<A>>,
-}
-
-impl<O, L, S, A, G, I> Runtime<L, S, A, G>
+impl<'a, O, L, S> Deref for WriteObject<'a, L, S>
 where
     O: ?Sized,
-    L: DerefMut<Target = O> + IntoShared<S, Iter = I>,
+    L: Deref<Target = O>,
+    S: Deref<Target = O>,
+{
+    type Target = O;
+    fn deref(&self) -> &Self::Target {
+        match self {
+            WriteObject::Local(local) => local as &Self::Target,
+            WriteObject::Shared(shared) => shared as &Self::Target,
+        }
+    }
+}
+
+impl<'a, O, L, S> DerefMut for WriteObject<'a, L, S>
+where
+    O: ?Sized,
+    L: DerefMut<Target = O>,
+    S: DerefMut<Target = O>,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            WriteObject::Local(local) => local as &mut Self::Target,
+            WriteObject::Shared(shared) => shared as &mut Self::Target,
+        }
+    }
+}
+
+pub struct ShareObject<S>(Arc<RwLock<S>>);
+
+pub trait IntoShared<S, I> {
+    fn into_shared(self) -> Result<(S, I), RuntimeError>;
+}
+
+pub struct Runtime<L, S, A, G, I> {
+    memory: Memory<QuasiObject<L, S>, A, G>,
+    frame_stack: Vec<Frame<A>>,
+    phantom: PhantomData<I>,
+}
+
+impl<O, L, S, A, G, I> Runtime<L, S, A, G, I>
+where
+    O: ?Sized,
+    L: DerefMut<Target = O> + IntoShared<S, I>,
     S: DerefMut<Target = O>,
     I: Iterator<Item = A>,
     A: Hash + Eq + Clone,
@@ -112,7 +142,7 @@ where
     }
 }
 
-impl<L, S, A, G> Runtime<L, S, A, G>
+impl<L, S, A, G, I> Runtime<L, S, A, G, I>
 where
     A: Hash + Eq + Clone,
     G: AddrGen<Addr = A>,
@@ -134,11 +164,11 @@ struct Frame<A> {
     context: A,
 }
 
-pub struct Builder<L, S, A, G> {
-    runtime: Runtime<L, S, A, G>,
+pub struct Builder<L, S, A, G, I> {
+    runtime: Runtime<L, S, A, G, I>,
 }
 
-impl<L, S, A, G> Builder<L, S, A, G>
+impl<L, S, A, G, I> Builder<L, S, A, G, I>
 where
     A: Hash + Eq + Clone,
     G: AddrGen<Addr = A>,
@@ -148,6 +178,7 @@ where
             runtime: Runtime {
                 memory: Memory::new(count, gen),
                 frame_stack: Vec::new(),
+                phantom: PhantomData,
             },
         }
     }
@@ -161,11 +192,12 @@ where
     }
 }
 
-impl<L, S, A, G> Runtime<L, S, A, G> {
-    pub fn new(builder: Builder<L, S, A, G>, context: A) -> Self {
+impl<L, S, A, G, I> Runtime<L, S, A, G, I> {
+    pub fn new(builder: Builder<L, S, A, G, I>, context: A) -> Self {
         Self {
             memory: builder.runtime.memory,
             frame_stack: vec![Frame { context }],
+            phantom: PhantomData,
         }
     }
 

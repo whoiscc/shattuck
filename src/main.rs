@@ -7,66 +7,66 @@ use std::vec::IntoIter;
 extern crate shattuck;
 use shattuck::core::runtime::{Builder, IntoShared, Runtime};
 use shattuck::core::runtime_error::RuntimeError;
-use shattuck::object::Object;
+use shattuck::object::{AsObject, Object, SharedObject};
 use shattuck::util::addr_gen::Inc;
 
 #[derive(Debug)]
 struct IntObject(i64);
 
-impl Object for IntObject {}
+type I = IntoIter<usize>;
 
-struct Local<A>(Box<dyn Object>, PhantomData<A>);
-struct Shared(Box<dyn Object>);
+impl IntoShared<Shared<I>, I> for IntObject {
+    fn into_shared(self) -> Result<(Shared<I>, I), RuntimeError> {
+        Ok((Shared(Box::new(self), PhantomData), Vec::new().into_iter()))
+    }
+}
 
-impl<A> Deref for Local<A> {
-    type Target = dyn Object;
+impl AsObject<Shared<I>, I> for IntObject {
+    fn as_object(&self) -> &dyn Object<Shared<I>, I> {
+        self
+    }
+
+    fn as_object_mut(&mut self) -> &mut dyn Object<Shared<I>, I> {
+        self
+    }
+}
+
+impl Object<Shared<I>, I> for IntObject {}
+impl SharedObject<Shared<I>, I> for IntObject {}
+
+struct Local<I>(Box<dyn Object<Shared<I>, I>>, PhantomData<I>);
+struct Shared<I>(Box<dyn SharedObject<Shared<I>, I>>, PhantomData<I>);
+
+impl Deref for Local<I> {
+    type Target = dyn Object<Shared<I>, I>;
 
     fn deref(&self) -> &Self::Target {
         &*self.0
     }
 }
 
-impl<A> DerefMut for Local<A> {
+impl DerefMut for Local<I> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut *self.0
     }
 }
 
-impl Deref for Shared {
-    type Target = dyn Object;
+impl Deref for Shared<I> {
+    type Target = dyn Object<Shared<I>, I>;
 
     fn deref(&self) -> &Self::Target {
-        &*self.0
+        &*self.0.as_object()
     }
 }
 
-impl DerefMut for Shared {
+impl DerefMut for Shared<I> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut *self.0
+        &mut *self.0.as_object_mut()
     }
 }
 
-impl<A> IntoShared<Shared> for Local<A> {
-    type Iter = IntoIter<A>;
-
-    fn into_shared(self) -> Result<(Shared, Self::Iter), RuntimeError> {
-        Ok((Shared(self.0), Vec::<A>::new().into_iter()))
-    }
-}
+use std::thread;
 
 fn main() {
-    let mut builder: Builder<Local<_>, Shared, _, _> = Builder::new(16, Inc::new());
-    let addr = builder
-        .insert_local(Local(Box::new(IntObject(42)), PhantomData))
-        .unwrap();
-    let mut runtime = Runtime::new(builder, addr);
-    {
-        let object = runtime.read(&addr).unwrap();
-        println!("{:?}", object.as_any().downcast_ref::<IntObject>());
-    }
-    let _ = runtime.share(&addr);
-    {
-        let object = runtime.read(&addr).unwrap();
-        println!("{:?}", object.as_any().downcast_ref::<IntObject>());
-    }
+    //
 }
