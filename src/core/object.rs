@@ -59,6 +59,10 @@ impl SharedObject {
                 .map_err(|_| RuntimeError::AccessConflict)?,
         ))
     }
+
+    pub fn share(&self) -> SharedObject {
+        SharedObject(Arc::clone(&self.0))
+    }
 }
 
 pub struct ReadShared<'a>(RwLockReadGuard<'a, dyn Any + Send + Sync>);
@@ -104,9 +108,18 @@ mod tests {
     fn sample_shared_int() {
         let i0 = SharedObject::new(42);
         assert_eq!(i0.read().unwrap().to_ref::<i32>().unwrap(), &42);
-        let _i0_read = i0.read().unwrap();
-        assert!(i0.write().is_err());
+        {
+            let _i0_read = i0.read().unwrap();
+            assert!(i0.write().is_err());
+        }
 
-        //
+        let i1 = i0.share();
+        use std::thread;
+        let handle = thread::spawn(move || {
+            assert_eq!(i1.read().unwrap().to_ref::<i32>().unwrap(), &42);
+            *i1.write().unwrap().to_mut::<i32>().unwrap() = 43;
+        });
+        handle.join().unwrap();
+        assert_eq!(i0.read().unwrap().to_ref::<i32>().unwrap(), &43);
     }
 }

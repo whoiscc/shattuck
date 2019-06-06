@@ -1,45 +1,38 @@
 //
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::hash::Hash;
 
+use crate::core::object::{Object, SharedObject};
 use crate::core::runtime_error::RuntimeError;
-use crate::util::addr_gen::Inc;
-use crate::core::runtime::QuasiObject;
 
+pub enum QuasiObject {
+    Local(Object),
+    Shared(SharedObject),
+}
 
-pub(crate) struct Memory {
+pub struct Memory {
     max_object_count: usize,
     objects: HashMap<usize, QuasiObject>,
-    pub next_addr: Inc,
-    pub ref_map: RefMap<usize>,
+    next_addr: usize,
+    pub ref_map: RefMap,
 }
 
-pub struct RefMap<A> {
-    entry: Option<A>,
-    graph: HashMap<A, HashSet<A>>,
+pub struct RefMap {
+    entry: Option<usize>,
+    graph: HashMap<usize, HashSet<usize>>,
 }
 
-pub trait AddrGen {
-    type Addr;
-    fn create(&mut self) -> Self::Addr;
-}
-
-impl<O, A, G> Memory<O, A, G>
-where
-    A: Hash + Eq + Clone,
-    G: AddrGen<Addr = A>,
-{
-    pub fn new(count: usize, addr_gen: G) -> Self {
-        Memory {
+impl Memory {
+    pub fn new(count: usize) -> Self {
+        Self {
             max_object_count: count,
             objects: HashMap::new(),
-            next_addr: addr_gen,
+            next_addr: 0,
             ref_map: RefMap::new(),
         }
     }
 
-    pub fn insert(&mut self, object: O) -> Result<A, RuntimeError> {
+    pub fn insert(&mut self, object: QuasiObject) -> Result<usize, RuntimeError> {
         if self.objects.len() == self.max_object_count {
             self.collect();
         }
@@ -47,36 +40,36 @@ where
         if self.objects.len() == self.max_object_count {
             return Err(RuntimeError::MemoryFull);
         }
-        let addr = self.next_addr.create();
-        self.objects.insert(addr.clone(), object);
-        self.ref_map.graph.insert(addr.clone(), HashSet::new());
+        let addr = self.next_addr;
+        self.next_addr += 1;
+        self.objects.insert(addr, object);
+        self.ref_map.graph.insert(addr, HashSet::new());
         Ok(addr)
     }
 
-    pub fn get(&self, addr: &A) -> Result<&O, RuntimeError> {
-        self.objects.get(addr).ok_or_else(|| RuntimeError::SegFault)
-    }
-
-    pub fn get_mut(&mut self, addr: &A) -> Result<&mut O, RuntimeError> {
+    pub fn get(&self, addr: usize) -> Result<&QuasiObject, RuntimeError> {
         self.objects
-            .get_mut(addr)
+            .get(&addr)
             .ok_or_else(|| RuntimeError::SegFault)
     }
 
-    pub fn replace(&mut self, dest: &A, src: O) -> Result<O, RuntimeError> {
+    pub fn get_mut(&mut self, addr: usize) -> Result<&mut QuasiObject, RuntimeError> {
+        self.objects
+            .get_mut(&addr)
+            .ok_or_else(|| RuntimeError::SegFault)
+    }
+
+    pub fn replace(&mut self, dest: usize, src: QuasiObject) -> Result<QuasiObject, RuntimeError> {
         let replaced = self
             .objects
-            .remove(dest)
+            .remove(&dest)
             .ok_or_else(|| RuntimeError::SegFault)?;
         self.objects.insert(dest.to_owned(), src);
         Ok(replaced)
     }
 }
 
-impl<A> RefMap<A>
-where
-    A: Hash + Eq,
-{
+impl RefMap {
     fn new() -> Self {
         Self {
             graph: HashMap::new(),
@@ -84,40 +77,29 @@ where
         }
     }
 
-    pub fn set_entry(&mut self, addr: A) -> Result<(), RuntimeError> {
-        self.graph.get(&addr).ok_or(RuntimeError::SegFault)?;
+    pub fn set_entry(&mut self, addr: usize) -> Result<(), RuntimeError> {
         self.entry = Some(addr);
         Ok(())
     }
 
-    pub fn hold(&mut self, holder: A, holdee: A) -> Result<(), RuntimeError> {
-        self.graph
-            .get_mut(&holder)
-            .ok_or_else(|| RuntimeError::SegFault)?
-            .insert(holdee);
+    pub fn hold(&mut self, holder: usize, holdee: usize) -> Result<(), RuntimeError> {
+        self.graph.get_mut(&holder).unwrap().insert(holdee);
         Ok(())
     }
 
-    pub fn unhold(&mut self, holder: A, holdee: A) -> Result<(), RuntimeError> {
-        self.graph
-            .get_mut(&holder)
-            .ok_or_else(|| RuntimeError::SegFault)?
-            .remove(&holdee);
+    pub fn unhold(&mut self, holder: usize, holdee: usize) -> Result<(), RuntimeError> {
+        self.graph.get_mut(&holder).unwrap().remove(&holdee);
         Ok(())
     }
 }
 
-impl<O, A, G> Memory<O, A, G>
-where
-    A: Hash + Eq + Clone,
-    G: AddrGen<Addr = A>,
-{
+impl Memory {
     pub fn collect(&mut self) {
         use std::time::Instant;
         let now = Instant::now();
 
-        let mut queue = VecDeque::<A>::new();
-        let mut dead_set: HashSet<A> = self.objects.keys().cloned().collect();
+        let mut queue = VecDeque::new();
+        let mut dead_set: HashSet<_> = self.objects.keys().cloned().collect();
         if let Some(root_addr) = &self.ref_map.entry {
             queue.push_back(root_addr.to_owned());
         }
@@ -153,15 +135,17 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::addr_gen::Inc;
-
-    #[derive(Clone, PartialEq, Eq, Debug)]
-    struct Object(i64);
+    use crate::core::object::{Object, To};
 
     #[test]
-    fn test_insert() {
-        let mut mem = Memory::new(16, Inc::new());
-        let object_id = mem.insert(Object(42)).unwrap();
-        assert_eq!(mem.get(&object_id).unwrap(), &Object(42));
+    fn insert_local() {
+        let mut mem = Memory::new(16);
+        let object_id = mem.insert(QuasiObject::Local(Object::new(42))).unwrap();
+        if let QuasiObject::Local(object) = mem.get(object_id).unwrap() {
+            assert_eq!(object.to_ref::<i32>().unwrap(), &42);
+        }
+
+        mem.collect();
+        assert!(mem.get(object_id).is_err());
     }
 }
