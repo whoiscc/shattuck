@@ -10,7 +10,7 @@ use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use crate::core::memory::{AddrGen, Memory, RefMap};
 use crate::core::runtime_error::RuntimeError;
 
-enum QuasiObject<L, S> {
+pub(crate) enum QuasiObject<L, S> {
     Local(L),
     Shared(Arc<RwLock<S>>),
     Trans,

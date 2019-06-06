@@ -10,6 +10,7 @@ pub enum RuntimeError {
     MemoryFull,
     NotCallable,
     NotSharable,
+    TypeMismatch,
 }
 
 impl Display for RuntimeError {
@@ -20,6 +21,7 @@ impl Display for RuntimeError {
             RuntimeError::MemoryFull => write!(f, "memory full"),
             RuntimeError::NotCallable => write!(f, "not callable"),
             RuntimeError::NotSharable => write!(f, "not sharable"),
+            RuntimeError::TypeMismatch => write!(f, "type mismatch"),
         }
     }
 }

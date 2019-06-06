@@ -1,15 +1,18 @@
 //
 
-use crate::core::runtime_error::RuntimeError;
-
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::Hash;
 
-pub(crate) struct Memory<O, A, G> {
+use crate::core::runtime_error::RuntimeError;
+use crate::util::addr_gen::Inc;
+use crate::core::runtime::QuasiObject;
+
+
+pub(crate) struct Memory {
     max_object_count: usize,
-    objects: HashMap<A, O>,
-    pub next_addr: G,
-    pub ref_map: RefMap<A>,
+    objects: HashMap<usize, QuasiObject>,
+    pub next_addr: Inc,
+    pub ref_map: RefMap<usize>,
 }
 
 pub struct RefMap<A> {
