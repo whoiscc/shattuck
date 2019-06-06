@@ -137,14 +137,29 @@ impl Memory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::object::{Object, To};
+    use crate::core::object::{Object, Prop, To};
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct Int(i32);
+
+    impl Prop for Int {
+        fn get(&self, _key: &str) -> Result<Addr, RuntimeError> {
+            unimplemented!()
+        }
+
+        fn set(&mut self, _key: &str, _value: Addr) -> Result<(), RuntimeError> {
+            unimplemented!()
+        }
+    }
 
     #[test]
     fn insert_local() {
         let mut mem = Memory::new(16);
-        let object_id = mem.insert(QuasiObject::Local(Object::new(42))).unwrap();
+        let object_id = mem
+            .insert(QuasiObject::Local(Object::new(Int(42))))
+            .unwrap();
         if let QuasiObject::Local(object) = mem.get(object_id).unwrap() {
-            assert_eq!(object.to_ref::<i32>().unwrap(), &42);
+            assert_eq!(object.to_ref::<Int>().unwrap(), &Int(42));
         }
 
         mem.collect();
