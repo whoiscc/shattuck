@@ -266,18 +266,12 @@ impl Drop for Memory {
 mod tests {
     use super::*;
 
-    use crate::core::object::{GetHoldeeOfObject, GetHoldeeOfSyncObject};
+    use crate::core::object::GetHoldee;
 
     struct Int(i32);
 
-    unsafe impl GetHoldeeOfObject for Int {
-        fn get_holdee(_object: &Object) -> Vec<Address> {
-            Vec::new()
-        }
-    }
-
-    unsafe impl GetHoldeeOfSyncObject for Int {
-        fn get_holdee(_object: &SyncObject) -> Vec<Address> {
+    unsafe impl GetHoldee for Int {
+        fn get_holdee(&self) -> Vec<Address> {
             Vec::new()
         }
     }
@@ -335,21 +329,9 @@ mod tests {
 
     struct Node(Vec<Address>);
 
-    unsafe impl GetHoldeeOfObject for Node {
-        fn get_holdee(object: &Object) -> Vec<Address> {
-            object.as_ref::<Node>().unwrap().0.to_owned()
-        }
-    }
-
-    unsafe impl GetHoldeeOfSyncObject for Node {
-        fn get_holdee(object: &SyncObject) -> Vec<Address> {
-            object
-                .get_ref()
-                .unwrap()
-                .as_ref::<Node>()
-                .unwrap()
-                .0
-                .to_owned()
+    unsafe impl GetHoldee for Node {
+        fn get_holdee(&self) -> Vec<Address> {
+            self.0.to_owned()
         }
     }
 

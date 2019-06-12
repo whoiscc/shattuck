@@ -8,8 +8,18 @@ use crate::core::memory::Address;
 
 type GetObjectHoldee = fn(&Object) -> Vec<Address>;
 
-pub unsafe trait GetHoldeeOfObject {
-    fn get_holdee(object: &Object) -> Vec<Address>;
+pub unsafe trait GetHoldee {
+    fn get_holdee(&self) -> Vec<Address>;
+}
+
+trait GetHoldeeOfObject {
+    fn get_object_holdee(object: &Object) -> Vec<Address>;
+}
+
+impl<T: Any + GetHoldee> GetHoldeeOfObject for T {
+    fn get_object_holdee(object: &Object) -> Vec<Address> {
+        object.as_ref::<Self>().unwrap().get_holdee()
+    }
 }
 
 pub struct Object {
@@ -18,10 +28,10 @@ pub struct Object {
 }
 
 impl Object {
-    pub fn new<T: Any + GetHoldeeOfObject>(content: T) -> Self {
+    pub fn new<T: Any + GetHoldee>(content: T) -> Self {
         Self {
             content: Box::new(content),
-            get_holdee_f: T::get_holdee,
+            get_holdee_f: T::get_object_holdee,
         }
     }
 
@@ -48,8 +58,14 @@ impl Object {
 
 type GetSyncObjectHoldee = fn(&SyncObject) -> Vec<Address>;
 
-pub unsafe trait GetHoldeeOfSyncObject {
-    fn get_holdee(object: &SyncObject) -> Vec<Address>;
+trait GetHoldeeOfSyncObject {
+    fn get_sync_object_holdee(object: &SyncObject) -> Vec<Address>;
+}
+
+impl<T: Any + GetHoldee> GetHoldeeOfSyncObject for T {
+    fn get_sync_object_holdee(object: &SyncObject) -> Vec<Address> {
+        object.get_ref().unwrap().as_ref::<Self>().unwrap().get_holdee()
+    }
 }
 
 #[derive(Clone)]
@@ -59,10 +75,10 @@ pub struct SyncObject {
 }
 
 impl SyncObject {
-    pub fn new<T: Any + Send + Sync + GetHoldeeOfSyncObject>(content: T) -> Self {
+    pub fn new<T: Any + Send + Sync + GetHoldee>(content: T) -> Self {
         Self {
             content: Arc::new(RwLock::new(content)),
-            get_holdee_f: T::get_holdee,
+            get_holdee_f: T::get_sync_object_holdee,
         }
     }
 
@@ -72,7 +88,7 @@ impl SyncObject {
 }
 
 pub trait ToSync {
-    type Target: Any + Send + Sync + GetHoldeeOfSyncObject;
+    type Target: Any + Send + Sync + GetHoldee;
     fn to_sync(self) -> Result<Self::Target>;
 }
 
@@ -205,14 +221,14 @@ mod tests {
         handle.join().unwrap();
     }
 
-    unsafe impl GetHoldeeOfObject for TheAnswer {
-        fn get_holdee(_object: &Object) -> Vec<Address> {
+    unsafe impl GetHoldee for TheAnswer {
+        fn get_holdee(&self) -> Vec<Address> {
             Vec::new()
         }
     }
 
-    unsafe impl GetHoldeeOfSyncObject for SyncAnswer {
-        fn get_holdee(_object: &SyncObject) -> Vec<Address> {
+    unsafe impl GetHoldee for SyncAnswer {
+        fn get_holdee(&self) -> Vec<Address> {
             Vec::new()
         }
     }
