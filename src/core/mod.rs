@@ -1,6 +1,5 @@
 //
 
-pub mod memory;
+pub mod error;
 pub mod object;
-pub mod runtime;
-pub mod runtime_error;
+pub mod memory;

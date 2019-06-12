@@ -5,7 +5,6 @@ authors = ["cowsay"]
 edition = "2018"
 
 [dependencies]
-crossbeam = "^0.7.1"
-
-[dev-dependencies]
+failure = "^0.1.5"
+failure_derive = "^0.1.1"
 rand = "^0.6.5"
