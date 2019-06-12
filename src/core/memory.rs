@@ -114,12 +114,12 @@ pub struct Memory {
     entry: Option<Address>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Address(*mut Slot);
 
 impl Address {
     fn new(dual: Dual) -> Self {
-        Self(Box::leak(Box::new(Slot { dual, mark: false })))
+        Self(Box::into_raw(Box::new(Slot { dual, mark: false })))
     }
 
     fn slot_ref(&self) -> &Slot {
@@ -212,6 +212,10 @@ impl Memory {
     }
 
     pub fn collect(&mut self) {
+        use std::thread;
+        use std::time::Instant;
+        let start = Instant::now();
+
         let mut que = VecDeque::new();
         if let Some(entry) = self.entry {
             que.push_back(entry);
@@ -224,19 +228,37 @@ impl Memory {
                 }
             }
         }
+
+        let before_collect = self.slots.len();
         // ugly here
         self.slots.retain(|addr| {
             let marked = addr.is_marked();
-            addr.to_owned().unmark();
             if !marked {
                 addr.release();
+            } else {
+                addr.to_owned().unmark();
             }
             marked
         });
+
+        println!(
+            "<shattuck> {:?} collected {} objects in {} us.",
+            thread::current().id(),
+            before_collect - self.slots.len(),
+            start.elapsed().as_micros(),
+        );
     }
 
     pub fn n_object(&self) -> usize {
         self.slots.len()
+    }
+}
+
+impl Drop for Memory {
+    fn drop(&mut self) {
+        for addr in self.slots.iter() {
+            addr.release();
+        }
     }
 }
 
@@ -380,5 +402,54 @@ mod tests {
             addr.get_ref().unwrap().as_ref::<&Int, &Int, _>().unwrap().0,
             43
         );
+    }
+
+    use std::collections::HashSet;
+
+    extern crate rand;
+    use rand::{thread_rng, Rng};
+
+    #[test]
+    fn random_hold() {
+        let total = 4096;
+        let mut mem = Memory::new(total);
+        let mut alive_set = HashSet::new();
+        let mut addr_list = Vec::new();
+        let entry = mem.insert_local(Object::new(Node(Vec::new()))).unwrap();
+        mem.set_entry(entry);
+        alive_set.insert(0);
+        addr_list.push(entry);
+
+        let mut rng = thread_rng();
+        for i in 1..total {
+            let addr = mem.insert_local(Object::new(Node(Vec::new()))).unwrap();
+            addr_list.push(addr);
+            let mut chance = 0.8;
+            while rng.gen::<f64>() < chance {
+                let holder = rng.gen_range(0, i) as usize;
+                addr_list[holder]
+                    .get_mut()
+                    .unwrap()
+                    .as_mut::<&mut Node, &mut Node, _>()
+                    .unwrap()
+                    .0
+                    .push(addr);
+                if alive_set.contains(&holder) {
+                    alive_set.insert(i);
+                }
+                chance -= 0.2;
+            }
+        }
+        assert_eq!(mem.n_object(), total);
+        mem.collect();
+        assert_eq!(mem.n_object(), alive_set.len());
+    }
+
+    #[test]
+    #[ignore]
+    fn random_hold_1000() {
+        for _ in 0..1000 {
+            random_hold();
+        }
     }
 }
