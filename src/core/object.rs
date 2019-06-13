@@ -119,6 +119,24 @@ pub trait ToSync {
     fn to_sync(self) -> Result<Self::Target>;
 }
 
+pub trait NoSync {}
+
+pub struct NoSyncTarget;
+
+unsafe impl GetHoldee for NoSyncTarget {
+    fn get_holdee(&self) -> Vec<Address> {
+        unreachable!()
+    }
+}
+
+impl<T: NoSync> ToSync for T {
+    type Target = NoSyncTarget;
+
+    fn to_sync(self) -> Result<Self::Target> {
+        Err(Error::NotSharable)
+    }
+}
+
 impl Object {
     // explicit different name with ToSync::to_sync
     pub fn into_sync(self) -> Result<SyncObject> {

@@ -14,6 +14,10 @@ pub enum Error {
     NotCallable,
     #[fail(display = "not sharable")]
     NotSharable,
+    #[fail(display = "expect local object")]
+    ExpectLocal,
+    #[fail(display = "expect shared object")]
+    ExpectShared,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

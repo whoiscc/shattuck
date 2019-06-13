@@ -1,50 +1,48 @@
 //
 
 use std::any::Any;
-use std::cell::{Ref, RefCell, RefMut};
 use std::collections::VecDeque;
 use std::mem;
+use std::ops::{Deref, DerefMut};
 
 use crate::core::error::{Error, Result};
 use crate::core::object::{Object, SyncMut, SyncObject, SyncRef};
 
 enum Dual {
-    Local(RefCell<Object>),
+    Local(Object),
     Shared(SyncObject),
 }
 
 pub enum DualRef<'a> {
-    Local(Ref<'a, Object>),
+    Local(&'a Object),
     Shared(SyncRef<'a>),
 }
 
 pub enum DualMut<'a> {
-    Local(RefMut<'a, Object>),
+    Local(&'a mut Object),
     Shared(SyncMut<'a>),
 }
 
 impl Dual {
     fn get_ref(&self) -> Result<DualRef> {
         Ok(match self {
-            Dual::Local(object) => {
-                DualRef::Local(object.try_borrow().map_err(|_| Error::ViolateSync)?)
-            }
+            Dual::Local(object) => DualRef::Local(object),
             Dual::Shared(object) => DualRef::Shared(object.get_ref()?),
         })
     }
 
-    fn get_mut(&self) -> Result<DualMut> {
+    fn get_mut(&mut self) -> Result<DualMut> {
         Ok(match self {
-            Dual::Local(object) => {
-                DualMut::Local(object.try_borrow_mut().map_err(|_| Error::ViolateSync)?)
-            }
+            Dual::Local(object) => DualMut::Local(object),
+            // `SyncObject::get_mut` doesn't require `&mut self`
+            // but requiring it match semantic better
             Dual::Shared(object) => DualMut::Shared(object.get_mut()?),
         })
     }
 
     fn into_shared(self) -> Result<Self> {
         let object = match self {
-            Dual::Local(object) => object.into_inner().into_sync()?,
+            Dual::Local(object) => object.into_sync()?,
             Dual::Shared(object) => object,
         };
         Ok(Dual::Shared(object))
@@ -52,21 +50,42 @@ impl Dual {
 
     fn get_holdee(&self) -> Vec<Address> {
         match self {
-            // it is safe to `borrow` here
-            // this method may be called by `Memory::collect` only
-            // which keeps a mutable reference to the whole `Memory`
-            // thus this `Dual` owned by it cannot be referenced at the same time
-            Dual::Local(object) => object.borrow().get_holdee(),
+            Dual::Local(object) => object.get_holdee(),
             Dual::Shared(object) => object.get_holdee(),
         }
     }
 }
 
 impl<'a> DualRef<'a> {
-    pub fn as_ref<I>(&self) -> Result<&I>
+    pub fn as_local_ref<T: Any>(&self) -> Result<&T> {
+        if let DualRef::Local(object) = self {
+            object.as_ref()
+        } else {
+            Err(Error::ExpectLocal)
+        }
+    }
+
+    pub fn as_shared_ref<T: Any>(&self) -> Result<&T> {
+        if let DualRef::Shared(object) = self {
+            object.as_ref()
+        } else {
+            Err(Error::ExpectShared)
+        }
+    }
+
+    pub fn as_dual_ref<L, S, I>(&self) -> Result<&I>
     where
-        I: Any,
+        I: ?Sized,
+        L: Any + Deref<Target = I>,
+        S: Any + Deref<Target = I>,
     {
+        match self {
+            DualRef::Local(object) => object.as_ref::<L>().map(|r| &*r as &I),
+            DualRef::Shared(object) => object.as_ref::<S>().map(|r| &*r as &I),
+        }
+    }
+
+    pub fn as_ref<T: Any>(&self) -> Result<&T> {
         match self {
             DualRef::Local(object) => object.as_ref(),
             DualRef::Shared(object) => object.as_ref(),
@@ -75,20 +94,70 @@ impl<'a> DualRef<'a> {
 }
 
 impl<'a> DualMut<'a> {
-    pub fn as_ref<I>(&self) -> Result<&I>
+    pub fn as_local_ref<T: Any>(&self) -> Result<&T> {
+        if let DualMut::Local(object) = self {
+            object.as_ref()
+        } else {
+            Err(Error::ExpectLocal)
+        }
+    }
+
+    pub fn as_shared_ref<T: Any>(&self) -> Result<&T> {
+        if let DualMut::Shared(object) = self {
+            object.as_ref()
+        } else {
+            Err(Error::ExpectShared)
+        }
+    }
+
+    pub fn as_dual_ref<L, S, I>(&self) -> Result<&I>
     where
-        I: Any,
+        I: ?Sized,
+        L: Any + Deref<Target = I>,
+        S: Any + Deref<Target = I>,
     {
+        match self {
+            DualMut::Local(object) => object.as_ref::<L>().map(|r| &*r as &I),
+            DualMut::Shared(object) => object.as_ref::<S>().map(|r| &*r as &I),
+        }
+    }
+
+    pub fn as_ref<T: Any>(&self) -> Result<&T> {
         match self {
             DualMut::Local(object) => object.as_ref(),
             DualMut::Shared(object) => object.as_ref(),
         }
     }
 
-    pub fn as_mut<I>(&mut self) -> Result<&mut I>
+    pub fn as_local_mut<T: Any>(&mut self) -> Result<&mut T> {
+        if let DualMut::Local(object) = self {
+            object.as_mut()
+        } else {
+            Err(Error::ExpectLocal)
+        }
+    }
+
+    pub fn as_shared_mut<T: Any>(&mut self) -> Result<&mut T> {
+        if let DualMut::Shared(object) = self {
+            object.as_mut()
+        } else {
+            Err(Error::ExpectShared)
+        }
+    }
+
+    pub fn as_dual_mut<L, S, I>(&mut self) -> Result<&mut I>
     where
-        I: Any,
+        I: ?Sized,
+        L: Any + DerefMut<Target = I>,
+        S: Any + DerefMut<Target = I>,
     {
+        match self {
+            DualMut::Local(object) => object.as_mut::<L>().map(|r| &mut *r as &mut I),
+            DualMut::Shared(object) => object.as_mut::<S>().map(|r| &mut *r as &mut I),
+        }
+    }
+
+    pub fn as_mut<T: Any>(&mut self) -> Result<&mut T> {
         match self {
             DualMut::Local(object) => object.as_mut(),
             DualMut::Shared(object) => object.as_mut(),
@@ -170,7 +239,7 @@ impl Memory {
     }
 
     pub fn insert_local(&mut self, object: Object) -> Result<Address> {
-        self.insert_dual(Dual::Local(RefCell::new(object)))
+        self.insert_dual(Dual::Local(object))
     }
 
     pub fn insert_shared(&mut self, object: SyncObject) -> Result<Address> {
@@ -260,7 +329,7 @@ impl Drop for Memory {
 mod tests {
     use super::*;
 
-    use crate::core::object::{ToSync, GetHoldee};
+    use crate::core::object::{GetHoldee, ToSync};
 
     struct Int(i32);
 
@@ -313,20 +382,9 @@ mod tests {
         }
     }
 
-    struct NotSharableTarget;
+    use crate::core::object::NoSync;
 
-    unsafe impl GetHoldee for NotSharableTarget {
-        fn get_holdee(&self) -> Vec<Address> {
-            unreachable!()
-        }
-    }
-
-    impl ToSync for Node {
-        type Target = NotSharableTarget;
-        fn to_sync(self) -> Result<Self::Target> {
-            Err(Error::NotSharable)
-        }
-    }
+    impl NoSync for Node {}
 
     #[test]
     fn keep_alive_after_collect() {
