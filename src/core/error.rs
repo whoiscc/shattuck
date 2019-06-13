@@ -12,6 +12,8 @@ pub enum Error {
     OutOfMemory,
     #[fail(display = "not callable")]
     NotCallable,
+    #[fail(display = "not sharable")]
+    NotSharable,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

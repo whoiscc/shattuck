@@ -44,7 +44,7 @@ fn main() {
             .as_ref::<Int>()
             .unwrap()
     );
-    let shared = runtime.context().share::<Int>().unwrap();
+    let shared = runtime.context().share().unwrap();
     let handle = thread::spawn(move || {
         let mut memory = Memory::new(16);
         let context = memory.insert_shared(shared).unwrap();

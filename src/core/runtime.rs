@@ -2,7 +2,7 @@
 
 use crate::core::error::{Error, Result};
 use crate::core::memory::{Address, Memory};
-use crate::core::object::{GetHoldee, Object};
+use crate::core::object::{GetHoldee, Object, ToSync};
 
 pub struct Runtime {
     pub memory: Memory,
@@ -11,6 +11,21 @@ pub struct Runtime {
 
 struct Frame {
     context: Address,
+}
+
+// TODO: share it
+struct NotSharableTarget;
+
+unsafe impl GetHoldee for NotSharableTarget {
+    fn get_holdee(&self) -> Vec<Address> {
+        unreachable!()
+    }
+}
+impl ToSync for Frame {
+    type Target = NotSharableTarget;
+    fn to_sync(self) -> Result<Self::Target> {
+        Err(Error::NotSharable)
+    }
 }
 
 unsafe impl GetHoldee for Frame {

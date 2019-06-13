@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 use std::mem;
 
 use crate::core::error::{Error, Result};
-use crate::core::object::{Object, SyncMut, SyncObject, SyncRef, ToSync};
+use crate::core::object::{Object, SyncMut, SyncObject, SyncRef};
 
 enum Dual {
     Local(RefCell<Object>),
@@ -42,9 +42,9 @@ impl Dual {
         })
     }
 
-    fn into_shared<T: Any + ToSync>(self) -> Result<Self> {
+    fn into_shared(self) -> Result<Self> {
         let object = match self {
-            Dual::Local(object) => object.into_inner().into_sync::<T>()?,
+            Dual::Local(object) => object.into_inner().into_sync()?,
             Dual::Shared(object) => object,
         };
         Ok(Dual::Shared(object))
@@ -185,9 +185,9 @@ impl Address {
         self.0 = unsafe { mem::zeroed() };
     }
 
-    pub fn share<T: Any + ToSync>(&mut self) -> Result<SyncObject> {
+    pub fn share(&mut self) -> Result<SyncObject> {
         let slot = unsafe { *Box::from_raw(self.0) };
-        let shared = slot.dual.into_shared::<T>()?;
+        let shared = slot.dual.into_shared()?;
         self.0 = Box::leak(Box::new(Slot {
             dual: shared,
             mark: slot.mark,
@@ -201,7 +201,7 @@ impl Address {
 }
 
 impl Memory {
-    pub fn set_entry(&mut self, entry: Address) {
+    pub(crate) fn set_entry(&mut self, entry: Address) {
         self.entry = Some(entry);
     }
 
@@ -260,7 +260,7 @@ impl Drop for Memory {
 mod tests {
     use super::*;
 
-    use crate::core::object::GetHoldee;
+    use crate::core::object::{ToSync, GetHoldee};
 
     struct Int(i32);
 
@@ -292,7 +292,7 @@ mod tests {
         let mut mem = Memory::new(16);
         let mut addr = mem.insert_local(Object::new(Int(42))).unwrap();
         assert_eq!(addr.get_ref().unwrap().as_ref::<Int>().unwrap().0, 42);
-        addr.share::<Int>().unwrap();
+        addr.share().unwrap();
         assert_eq!(addr.get_ref().unwrap().as_ref::<Int>().unwrap().0, 42);
     }
 
@@ -310,6 +310,21 @@ mod tests {
     unsafe impl GetHoldee for Node {
         fn get_holdee(&self) -> Vec<Address> {
             self.0.to_owned()
+        }
+    }
+
+    struct NotSharableTarget;
+
+    unsafe impl GetHoldee for NotSharableTarget {
+        fn get_holdee(&self) -> Vec<Address> {
+            unreachable!()
+        }
+    }
+
+    impl ToSync for Node {
+        type Target = NotSharableTarget;
+        fn to_sync(self) -> Result<Self::Target> {
+            Err(Error::NotSharable)
         }
     }
 
@@ -343,7 +358,7 @@ mod tests {
     fn simple_share() {
         let mut mem = Memory::new(16);
         let mut addr = mem.insert_local(Object::new(Int(42))).unwrap();
-        let shared = addr.share::<Int>().unwrap();
+        let shared = addr.share().unwrap();
         let handle = thread::spawn(move || {
             let mut mem = Memory::new(16);
             let mut addr = mem.insert_shared(shared).unwrap();

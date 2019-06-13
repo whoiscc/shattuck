@@ -25,16 +25,30 @@ impl<T: Any + GetHoldee> GetHoldeeOfObject for T {
     }
 }
 
+trait MakeSync {
+    fn make_sync(object: Object) -> Result<SyncObject>;
+}
+
+impl<T: Any + ToSync> MakeSync for T {
+    fn make_sync(object: Object) -> Result<SyncObject> {
+        Ok(SyncObject::new(object.take::<T>()?.to_sync()?))
+    }
+}
+
+type MakeSyncFn = fn(Object) -> Result<SyncObject>;
+
 pub struct Object {
     content: Box<dyn Any>,
     get_holdee_f: GetObjectHoldee,
+    make_sync_f: MakeSyncFn,
 }
 
 impl Object {
-    pub fn new<T: Any + GetHoldee>(content: T) -> Self {
+    pub fn new<T: Any + GetHoldee + ToSync>(content: T) -> Self {
         Self {
             content: Box::new(content),
             get_holdee_f: T::get_object_holdee,
+            make_sync_f: T::make_sync,
         }
     }
 
@@ -107,8 +121,8 @@ pub trait ToSync {
 
 impl Object {
     // explicit different name with ToSync::to_sync
-    pub fn into_sync<T: Any + ToSync>(self) -> Result<SyncObject> {
-        Ok(SyncObject::new(self.take::<T>()?.to_sync()?))
+    pub fn into_sync(self) -> Result<SyncObject> {
+        (self.make_sync_f)(self)
     }
 }
 
@@ -271,7 +285,7 @@ mod tests {
     #[test]
     fn to_sync() {
         let ans_object = Object::new(TheAnswer::new());
-        let sync_ans = ans_object.into_sync::<TheAnswer>().unwrap();
+        let sync_ans = ans_object.into_sync().unwrap();
         assert_eq!(
             sync_ans
                 .get_ref()
