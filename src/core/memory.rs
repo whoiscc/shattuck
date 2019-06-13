@@ -4,7 +4,6 @@ use std::any::Any;
 use std::cell::{Ref, RefCell, RefMut};
 use std::collections::VecDeque;
 use std::mem;
-use std::ops::{Deref, DerefMut};
 
 use crate::core::error::{Error, Result};
 use crate::core::object::{Object, SyncMut, SyncObject, SyncRef, ToSync};
@@ -64,10 +63,8 @@ impl Dual {
 }
 
 impl<'a> DualRef<'a> {
-    pub fn as_ref<T, U, I>(&self) -> Result<&I>
+    pub fn as_ref<I>(&self) -> Result<&I>
     where
-        T: Any + Deref<Target = I>,
-        U: Any + Deref<Target = I>,
         I: Any,
     {
         match self {
@@ -78,10 +75,8 @@ impl<'a> DualRef<'a> {
 }
 
 impl<'a> DualMut<'a> {
-    pub fn as_ref<T, U, I>(&self) -> Result<&I>
+    pub fn as_ref<I>(&self) -> Result<&I>
     where
-        T: Any + Deref<Target = I>,
-        U: Any + Deref<Target = I>,
         I: Any,
     {
         match self {
@@ -90,10 +85,8 @@ impl<'a> DualMut<'a> {
         }
     }
 
-    pub fn as_mut<T, U, I>(&mut self) -> Result<&mut I>
+    pub fn as_mut<I>(&mut self) -> Result<&mut I>
     where
-        T: Any + DerefMut<Target = I>,
-        U: Any + DerefMut<Target = I>,
         I: Any,
     {
         match self {
@@ -280,19 +273,9 @@ mod tests {
     fn memory_insert() {
         let mut mem = Memory::new(16);
         let mut addr = mem.insert_local(Object::new(Int(42))).unwrap();
-        assert_eq!(
-            addr.get_ref().unwrap().as_ref::<&Int, &Int, _>().unwrap().0,
-            42
-        );
-        *addr
-            .get_mut()
-            .unwrap()
-            .as_mut::<&mut Int, &mut Int, _>()
-            .unwrap() = Int(43);
-        assert_eq!(
-            addr.get_ref().unwrap().as_ref::<&Int, &Int, _>().unwrap().0,
-            43
-        );
+        assert_eq!(addr.get_ref().unwrap().as_ref::<Int>().unwrap().0, 42);
+        *addr.get_mut().unwrap().as_mut::<Int>().unwrap() = Int(43);
+        assert_eq!(addr.get_ref().unwrap().as_ref::<Int>().unwrap().0, 43);
     }
 
     impl ToSync for Int {
@@ -307,15 +290,9 @@ mod tests {
     fn make_shared() {
         let mut mem = Memory::new(16);
         let mut addr = mem.insert_local(Object::new(Int(42))).unwrap();
-        assert_eq!(
-            addr.get_ref().unwrap().as_ref::<&Int, &Int, _>().unwrap().0,
-            42
-        );
+        assert_eq!(addr.get_ref().unwrap().as_ref::<Int>().unwrap().0, 42);
         addr.share::<Int>().unwrap();
-        assert_eq!(
-            addr.get_ref().unwrap().as_ref::<&Int, &Int, _>().unwrap().0,
-            42
-        );
+        assert_eq!(addr.get_ref().unwrap().as_ref::<Int>().unwrap().0, 42);
     }
 
     #[test]
@@ -343,7 +320,7 @@ mod tests {
         holder
             .get_mut()
             .unwrap()
-            .as_mut::<&mut Node, &mut Node, _>()
+            .as_mut::<Node>()
             .unwrap()
             .0
             .push(holdee);
@@ -369,21 +346,11 @@ mod tests {
         let handle = thread::spawn(move || {
             let mut mem = Memory::new(16);
             let mut addr = mem.insert_shared(shared).unwrap();
-            assert_eq!(
-                addr.get_ref().unwrap().as_ref::<&Int, &Int, _>().unwrap().0,
-                42
-            );
-            *addr
-                .get_mut()
-                .unwrap()
-                .as_mut::<&mut Int, &mut Int, _>()
-                .unwrap() = Int(43);
+            assert_eq!(addr.get_ref().unwrap().as_ref::<Int>().unwrap().0, 42);
+            *addr.get_mut().unwrap().as_mut::<Int>().unwrap() = Int(43);
         });
         handle.join().unwrap();
-        assert_eq!(
-            addr.get_ref().unwrap().as_ref::<&Int, &Int, _>().unwrap().0,
-            43
-        );
+        assert_eq!(addr.get_ref().unwrap().as_ref::<Int>().unwrap().0, 43);
     }
 
     use std::collections::HashSet;
@@ -412,7 +379,7 @@ mod tests {
                 addr_list[holder]
                     .get_mut()
                     .unwrap()
-                    .as_mut::<&mut Node, &mut Node, _>()
+                    .as_mut::<Node>()
                     .unwrap()
                     .0
                     .push(addr);
