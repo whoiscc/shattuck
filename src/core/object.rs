@@ -18,6 +18,9 @@ trait GetHoldeeOfObject {
 
 impl<T: Any + GetHoldee> GetHoldeeOfObject for T {
     fn get_object_holdee(object: &Object) -> Vec<Address> {
+        // it is safe to `unwrap` here
+        // this method will be related to correct type
+        // in the constructor of `Object`
         object.as_ref::<Self>().unwrap().get_holdee()
     }
 }
@@ -64,7 +67,17 @@ trait GetHoldeeOfSyncObject {
 
 impl<T: Any + GetHoldee> GetHoldeeOfSyncObject for T {
     fn get_sync_object_holdee(object: &SyncObject) -> Vec<Address> {
-        object.get_ref().unwrap().as_ref::<Self>().unwrap().get_holdee()
+        // it is safe to `unwrap` the result of `get_ref` here
+        // this method will only be called by `Memory::collect`,
+        // which keeps a mutable reference to the whole `Memory`
+        // so no reference (of any kind) of this object could exist
+        // at the same time
+        object
+            .get_ref()
+            .unwrap()
+            .as_ref::<Self>()
+            .unwrap()
+            .get_holdee()
     }
 }
 

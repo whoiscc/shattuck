@@ -10,6 +10,8 @@ pub enum Error {
     InvalidAddress,
     #[fail(display = "out of memory")]
     OutOfMemory,
+    #[fail(display = "not callable")]
+    NotCallable,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

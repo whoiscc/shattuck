@@ -179,9 +179,10 @@ impl Memory {
 }
 
 impl Address {
-    fn release(self) {
+    fn release(mut self) {
         let slot = unsafe { Box::from_raw(self.0) };
         mem::drop(slot);
+        self.0 = unsafe { mem::zeroed() };
     }
 
     pub fn share<T: Any + ToSync>(&mut self) -> Result<SyncObject> {
