@@ -40,6 +40,20 @@ impl Dual {
         })
     }
 
+    fn sync_ref(&self) -> DualRef {
+        match self {
+            Dual::Local(object) => DualRef::Local(object),
+            Dual::Shared(object) => DualRef::Shared(object.sync_ref()),
+        }
+    }
+
+    fn sync_mut(&mut self) -> DualMut {
+        match self {
+            Dual::Local(object) => DualMut::Local(object),
+            Dual::Shared(object) => DualMut::Shared(object.sync_mut()),
+        }
+    }
+
     fn into_shared(self) -> Result<Self> {
         let object = match self {
             Dual::Local(object) => object.into_sync()?,
@@ -201,6 +215,14 @@ impl Address {
 
     pub fn get_mut(&mut self) -> Result<DualMut> {
         self.slot_mut().dual.get_mut()
+    }
+
+    pub fn sync_ref(&self) -> DualRef {
+        self.slot_ref().dual.sync_ref()
+    }
+
+    pub fn sync_mut(&mut self) -> DualMut {
+        self.slot_mut().dual.sync_mut()
     }
 
     fn get_holdee(&self) -> Vec<Address> {

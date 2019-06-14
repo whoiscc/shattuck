@@ -160,6 +160,10 @@ impl SyncObject {
             self.content.try_read().map_err(|_| Error::ViolateSync)?,
         ))
     }
+
+    pub fn sync_ref(&self) -> SyncRef {
+        SyncRef(self.content.read().unwrap())
+    }
 }
 
 impl<'a> SyncRef<'a> {
@@ -173,6 +177,10 @@ impl SyncObject {
         Ok(SyncMut(
             self.content.try_write().map_err(|_| Error::ViolateSync)?,
         ))
+    }
+
+    pub fn sync_mut(&self) -> SyncMut {
+        SyncMut(self.content.write().unwrap())
     }
 }
 
