@@ -130,6 +130,10 @@ impl Runtime {
         self.with_current(|frame| frame.address_stack.len())
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn push_parent(&mut self, index: usize) -> Result<()> {
         let frame_count = self.frame_stack.len();
         if frame_count == 1 {
@@ -206,7 +210,7 @@ impl Runtime {
         )?;
         let current_frame_size = self.len();
         let mut frame_object = Frame::new(context, Some(*self.frame_stack.last().unwrap()));
-        for index in args.iter() {
+        for index in args.iter().rev() {
             frame_object.push_address(self.get(*index)?);
         }
         let frame = self.memory.insert_local(Object::new(frame_object))?;

@@ -5,3 +5,4 @@ extern crate failure;
 extern crate failure_derive;
 
 pub mod core;
+pub mod objects;

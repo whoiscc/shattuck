@@ -3,6 +3,7 @@
 use std::any::Any;
 use std::collections::VecDeque;
 use std::mem;
+use std::ptr;
 
 use crate::core::error::{Error, Result};
 use crate::core::object::{Object, SyncMut, SyncObject, SyncRef};
@@ -257,12 +258,11 @@ impl Address {
     }
 
     pub fn share(&mut self) -> Result<SyncObject> {
-        let slot = unsafe { *Box::from_raw(self.0) };
-        let shared = slot.dual.into_shared()?;
-        self.0 = Box::leak(Box::new(Slot {
-            dual: shared,
-            mark: slot.mark,
-        }));
+        unsafe {
+            let mut slot = ptr::read(self.0);
+            slot.dual = slot.dual.into_shared()?;
+            ptr::write(self.0, slot);
+        }
         if let Dual::Shared(sync_object) = &self.slot_ref().dual {
             Ok(sync_object.clone())
         } else {
