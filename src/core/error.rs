@@ -18,6 +18,10 @@ pub enum Error {
     ExpectLocal,
     #[fail(display = "expect shared object")]
     ExpectShared,
+    #[fail(display = "pop empty stack")]
+    ExhaustedFrame,
+    #[fail(display = "no parent frame")]
+    NoParentFrame,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

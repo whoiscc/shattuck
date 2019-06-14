@@ -73,8 +73,6 @@ impl Object {
     }
 }
 
-type GetSyncObjectHoldee = fn(&SyncObject) -> Vec<Address>;
-
 trait GetHoldeeOfSyncObject {
     fn get_sync_object_holdee(object: &SyncObject) -> Vec<Address>;
 }
@@ -98,24 +96,22 @@ impl<T: Any + GetHoldee> GetHoldeeOfSyncObject for T {
 #[derive(Clone)]
 pub struct SyncObject {
     content: Arc<RwLock<dyn Any + Send + Sync>>,
-    get_holdee_f: GetSyncObjectHoldee,
 }
 
 impl SyncObject {
-    pub fn new<T: Any + Send + Sync + GetHoldee>(content: T) -> Self {
+    pub fn new<T: Any + Send + Sync>(content: T) -> Self {
         Self {
             content: Arc::new(RwLock::new(content)),
-            get_holdee_f: T::get_sync_object_holdee,
         }
     }
 
     pub fn get_holdee(&self) -> Vec<Address> {
-        (self.get_holdee_f)(self)
+        Vec::new()
     }
 }
 
 pub trait ToSync {
-    type Target: Any + Send + Sync + GetHoldee;
+    type Target: Any + Send + Sync;
     fn to_sync(self) -> Result<Self::Target>;
 }
 
@@ -136,6 +132,17 @@ impl<T: NoSync> ToSync for T {
         Err(Error::NotSharable)
     }
 }
+
+// TODO
+// pub trait SelfSync: Any + Send + Sync {}
+
+// impl<T: SelfSync> ToSync for T {
+//     type Target = T;
+
+//     fn to_sync(self) -> Result<Self::Target> {
+//         Ok(self)
+//     }
+// }
 
 impl Object {
     // explicit different name with ToSync::to_sync

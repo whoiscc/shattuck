@@ -3,7 +3,6 @@
 use std::any::Any;
 use std::collections::VecDeque;
 use std::mem;
-use std::ops::{Deref, DerefMut};
 
 use crate::core::error::{Error, Result};
 use crate::core::object::{Object, SyncMut, SyncObject, SyncRef};
@@ -73,15 +72,16 @@ impl<'a> DualRef<'a> {
         }
     }
 
-    pub fn as_dual_ref<L, S, I>(&self) -> Result<&I>
+    pub fn as_dual_ref<L, S, LF, SF, R>(&self, local_fn: LF, shared_fn: SF) -> Result<R>
     where
-        I: ?Sized,
-        L: Any + Deref<Target = I>,
-        S: Any + Deref<Target = I>,
+        L: Any,
+        S: Any,
+        LF: FnOnce(&L) -> Result<R>,
+        SF: FnOnce(&S) -> Result<R>,
     {
         match self {
-            DualRef::Local(object) => object.as_ref::<L>().map(|r| &*r as &I),
-            DualRef::Shared(object) => object.as_ref::<S>().map(|r| &*r as &I),
+            DualRef::Local(object) => local_fn(object.as_ref::<L>()?),
+            DualRef::Shared(object) => shared_fn(object.as_ref::<S>()?),
         }
     }
 
@@ -110,15 +110,16 @@ impl<'a> DualMut<'a> {
         }
     }
 
-    pub fn as_dual_ref<L, S, I>(&self) -> Result<&I>
+    pub fn as_dual_ref<L, S, LF, SF, R>(&self, local_fn: LF, shared_fn: SF) -> Result<R>
     where
-        I: ?Sized,
-        L: Any + Deref<Target = I>,
-        S: Any + Deref<Target = I>,
+        L: Any,
+        S: Any,
+        LF: FnOnce(&L) -> Result<R>,
+        SF: FnOnce(&S) -> Result<R>,
     {
         match self {
-            DualMut::Local(object) => object.as_ref::<L>().map(|r| &*r as &I),
-            DualMut::Shared(object) => object.as_ref::<S>().map(|r| &*r as &I),
+            DualMut::Local(object) => local_fn(object.as_ref::<L>()?),
+            DualMut::Shared(object) => shared_fn(object.as_ref::<S>()?),
         }
     }
 
@@ -145,15 +146,16 @@ impl<'a> DualMut<'a> {
         }
     }
 
-    pub fn as_dual_mut<L, S, I>(&mut self) -> Result<&mut I>
+    pub fn as_dual_mut<L, S, LF, SF, R>(&mut self, local_fn: LF, shared_fn: SF) -> Result<R>
     where
-        I: ?Sized,
-        L: Any + DerefMut<Target = I>,
-        S: Any + DerefMut<Target = I>,
+        L: Any,
+        S: Any,
+        LF: FnOnce(&mut L) -> Result<R>,
+        SF: FnOnce(&mut S) -> Result<R>,
     {
         match self {
-            DualMut::Local(object) => object.as_mut::<L>().map(|r| &mut *r as &mut I),
-            DualMut::Shared(object) => object.as_mut::<S>().map(|r| &mut *r as &mut I),
+            DualMut::Local(object) => local_fn(object.as_mut::<L>()?),
+            DualMut::Shared(object) => shared_fn(object.as_mut::<S>()?),
         }
     }
 
