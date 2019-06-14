@@ -4,6 +4,14 @@ version = "0.1.0"
 authors = ["cowsay"]
 edition = "2018"
 
+description = "Rust-based script programming language."
+license = "MIT"
+license-file = "LICENSE"
+readme = "README.md"
+documentation = "https://docs.rs/shattuck"
+homepage = "https://github.com/whoiscc/shattuck"
+repository = "https://github.com/whoiscc/shattuck"
+
 [dependencies]
 failure = "^0.1.5"
 failure_derive = "^0.1.1"
