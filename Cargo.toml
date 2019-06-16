@@ -1,12 +1,11 @@
 [package]
 name = "shattuck"
-version = "0.1.0"
+version = "0.1.1-dev"
 authors = ["cowsay"]
 edition = "2018"
 
 description = "Rust-based script programming language."
 license = "MIT"
-license-file = "LICENSE"
 readme = "README.md"
 documentation = "https://docs.rs/shattuck"
 homepage = "https://github.com/whoiscc/shattuck"

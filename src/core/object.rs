@@ -73,26 +73,6 @@ impl Object {
     }
 }
 
-trait GetHoldeeOfSyncObject {
-    fn get_sync_object_holdee(object: &SyncObject) -> Vec<Address>;
-}
-
-impl<T: Any + GetHoldee> GetHoldeeOfSyncObject for T {
-    fn get_sync_object_holdee(object: &SyncObject) -> Vec<Address> {
-        // it is safe to `unwrap` the result of `get_ref` here
-        // this method will only be called by `Memory::collect`,
-        // which keeps a mutable reference to the whole `Memory`
-        // so no reference (of any kind) of this object could exist
-        // at the same time
-        object
-            .get_ref()
-            .unwrap()
-            .as_ref::<Self>()
-            .unwrap()
-            .get_holdee()
-    }
-}
-
 #[derive(Clone)]
 pub struct SyncObject {
     content: Arc<RwLock<dyn Any + Send + Sync>>,
@@ -103,10 +83,6 @@ impl SyncObject {
         Self {
             content: Arc::new(RwLock::new(content)),
         }
-    }
-
-    pub fn get_holdee(&self) -> Vec<Address> {
-        Vec::new()
     }
 }
 

@@ -65,7 +65,7 @@ impl Dual {
     fn get_holdee(&self) -> Vec<Address> {
         match self {
             Dual::Local(object) => object.get_holdee(),
-            Dual::Shared(object) => object.get_holdee(),
+            Dual::Shared(_) => Vec::new(),
         }
     }
 }
