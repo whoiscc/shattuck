@@ -12,6 +12,14 @@ pub unsafe trait GetHoldee {
     fn get_holdee(&self) -> Vec<Address>;
 }
 
+pub unsafe trait Orphan {}
+
+unsafe impl<T: Orphan> GetHoldee for T {
+    fn get_holdee(&self) -> Vec<Address> {
+        Vec::new()
+    }
+}
+
 trait GetHoldeeOfObject {
     fn get_object_holdee(object: &Object) -> Vec<Address>;
 }
@@ -108,17 +116,6 @@ impl<T: NoSync> ToSync for T {
         Err(Error::NotSharable)
     }
 }
-
-// TODO
-// pub trait SelfSync: Any + Send + Sync {}
-
-// impl<T: SelfSync> ToSync for T {
-//     type Target = T;
-
-//     fn to_sync(self) -> Result<Self::Target> {
-//         Ok(self)
-//     }
-// }
 
 impl Object {
     // explicit different name with ToSync::to_sync

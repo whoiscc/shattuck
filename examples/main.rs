@@ -5,8 +5,8 @@ use std::time::Duration;
 
 extern crate shattuck;
 use shattuck::core::error::Result;
-use shattuck::core::memory::{Address, Memory};
-use shattuck::core::object::{GetHoldee, Object, ToSync};
+use shattuck::core::memory::Memory;
+use shattuck::core::object::{Object, ToSync, Orphan};
 use shattuck::core::runtime::{Method, RuntimeBuilder};
 use shattuck::objects::thread::make_thread;
 
@@ -16,11 +16,7 @@ use rand::random;
 #[derive(Debug)]
 struct Int(i32);
 
-unsafe impl GetHoldee for Int {
-    fn get_holdee(&self) -> Vec<Address> {
-        Vec::new()
-    }
-}
+unsafe impl Orphan for Int {}
 
 impl ToSync for Int {
     type Target = Int;
