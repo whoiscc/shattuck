@@ -40,4 +40,8 @@ impl Object {
     pub fn downcast_mut<T: Any>(&mut self) -> Result<&mut T, Error> {
         (&mut self.content as &mut dyn Any).downcast_mut().ok_or(Error::TypeMismatch)
     }
+
+    pub fn downcast<T: Any>(self) -> Result<T, Error> {
+        Ok(*self.content.downcast().map_err(|_| Error::TypeMismatch)?)
+    }
 }

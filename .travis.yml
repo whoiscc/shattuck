@@ -6,4 +6,3 @@ install:
 script:
   - cargo clippy
   - cargo test
-  - cargo test -- --ignored
